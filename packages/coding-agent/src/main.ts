@@ -1797,11 +1797,6 @@ export async function runRootCommand(
 		) {
 			exitWithoutTerminal();
 		}
-		if (parsedArgs.approvalFloor && !isInteractive) {
-			throw new Error(
-				"--approval-floor always-ask requires an interactive session; protocol and print modes are unsupported",
-			);
-		}
 		// Only the interactive host renders a focusable Agent Hub / subagent session
 		// tree; declare it so headless subagent optimizations (e.g. skipping replan
 		// title refresh) can tell a focusable process from a print/RPC/eval one.
