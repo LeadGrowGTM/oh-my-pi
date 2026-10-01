@@ -4518,7 +4518,7 @@ describe("ExtensionRunner", () => {
 			} as AgentTool;
 		}
 
-		const runnerWithNative = async (native: AgentTool) => {
+		const runnerWithNative = async (native: AgentTool, approvalFloor?: "always-ask") => {
 			const result = await loadTestExtensions();
 			const runner = new ExtensionRunner(
 				result.extensions,
@@ -4526,6 +4526,11 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				approvalFloor,
 			);
 			runner.setNativeToolResolver(name =>
 				name === native.name ? { tool: native, makeContext: () => ({}) as never } : undefined,
@@ -4584,6 +4589,26 @@ describe("ExtensionRunner", () => {
 			);
 			// A fresh chain at depth 0 is unaffected by another chain's depth.
 			await expect(runner.invokeNativeTool("bash", { command: "echo hi" }, { depth: 0 })).resolves.toBeDefined();
+		});
+
+		it("rejects floored native exec delegation without a UI before it runs", async () => {
+			const seen: { params?: unknown } = {};
+			const runner = await runnerWithNative(nativeProbe(seen), "always-ask");
+
+			await expect(
+				runner.invokeNativeTool("bash", { command: "echo hi" }, { callerContext: { hasUI: false } as never }),
+			).rejects.toThrow(/requires approval but no interactive UI/);
+			expect(seen.params).toBeUndefined();
+		});
+
+		it("permits floored native read delegation", async () => {
+			const seen: { params?: unknown } = {};
+			const native = { ...nativeProbe(seen), approval: "read" as const };
+			const runner = await runnerWithNative(native, "always-ask");
+
+			await runner.invokeNativeTool("bash", { command: "echo hi" }, { callerContext: { hasUI: false } as never });
+
+			expect(seen.params).toEqual({ command: "echo hi" });
 		});
 	});
 

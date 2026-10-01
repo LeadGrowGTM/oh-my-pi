@@ -100,6 +100,7 @@ function createContext(overrides?: {
 	model?: Model;
 	agentId?: string;
 	parentPromptCacheKey?: string;
+	approvalFloor?: "always-ask";
 	register?: (run: CapturedJobRun, options?: AsyncJobRegisterOptions) => string;
 	activeToolNames?: string[];
 	enabledToolNames?: string[];
@@ -137,6 +138,7 @@ function createContext(overrides?: {
 		effectiveExtensionRoots: overrides?.effectiveExtensionRoots,
 		extensionPaths: overrides?.extensionPaths,
 		getAgentId: vi.fn(() => overrides?.agentId),
+		getApprovalFloor: vi.fn(() => overrides?.approvalFloor),
 		sendCustomMessage: vi.fn(async () => {
 			sequence.push("sendCustomMessage");
 		}),
@@ -286,6 +288,24 @@ describe("TanCommandController", () => {
 		// The local mapping keys off the session-manager id (not `session.sessionId`,
 		// still "parent-session"), matching the parent's large-paste / local:// writes.
 		expect(opts.getSessionId?.()).toBe("parent-local-session");
+	});
+
+	it("preserves the parent's approval floor in the tan child", async () => {
+		const harness = createContext({ approvalFloor: "always-ask" });
+		vi.spyOn(SessionManager, "forkFrom").mockResolvedValue(harness.cloneManager);
+		const { clone } = createCloneStub();
+		let capturedOptions: CreateAgentSessionOptions | undefined;
+		vi.spyOn(sdkModule, "createAgentSession").mockImplementation(async options => {
+			capturedOptions = options;
+			return { session: clone } as unknown as CreateAgentSessionResult;
+		});
+
+		await new TanCommandController(harness.ctx).start("check inherited policy");
+		const run = harness.capturedRun;
+		if (!run) throw new Error("tan job was not registered");
+		await run({ jobId: "job-123", signal: new AbortController().signal, reportProgress: async () => {} });
+
+		expect(capturedOptions?.approvalFloor).toBe("always-ask");
 	});
 
 	it("keeps the tangent alive until successive descendant results produce the final answer", async () => {
