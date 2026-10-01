@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import type { AgentToolContext } from "@oh-my-pi/pi-agent-core";
 import { parseArgs } from "@oh-my-pi/pi-coding-agent/cli/args";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
@@ -320,6 +321,10 @@ describe("--approval-floor always-ask", () => {
 			...BASE_SETTINGS,
 			"tools.approvalMode": "yolo",
 			"tools.approval": { bash: "allow" },
+			"bash.patterns": [
+				{ match: "rm -rf *", approval: "deny" },
+				{ match: "echo floor-write*", approval: "allow" },
+			],
 		});
 		({ session } = await createAgentSession({
 			cwd,
@@ -336,24 +341,14 @@ describe("--approval-floor always-ask", () => {
 			slashCommands: [],
 			enableMCP: false,
 			enableLsp: false,
-			toolNames: ["bash"],
+			toolNames: ["bash", "read"],
 		}));
 	});
 
 	afterAll(async () => {
 		await session.dispose();
-		// Windows may briefly retain session database handles after disposal; this retries OS cleanup, not program behavior.
-		for (let attempt = 0; attempt < 5; attempt++) {
-			try {
-				removeSyncWithRetries(tempDir);
-				break;
-			} catch (err) {
-				const code = (err as NodeJS.ErrnoException).code;
-				if (code !== "EBUSY" && code !== "ENOTEMPTY" && code !== "EPERM") throw err;
-				if (attempt === 4) break;
-				await Bun.sleep(50 * (attempt + 1));
-			}
-		}
+		session.modelRegistry.authStorage.close();
+		removeSyncWithRetries(tempDir);
 	});
 
 	it("parses the explicit flag, including equals form, and rejects unsupported values", () => {
@@ -380,6 +375,96 @@ describe("--approval-floor always-ask", () => {
 		).rejects.toThrow(/requires approval but no interactive UI/);
 		settings.override("tools.approvalMode", "yolo");
 		await expect(bash.execute("floor-yolo", args)).rejects.toThrow(/requires approval but no interactive UI/);
+	});
+
+	it("refuses print and protocol while stdin remains open", async () => {
+		const mainURL = pathToFileURL(path.resolve(import.meta.dir, "../../src/main.ts")).href;
+		const argsURL = pathToFileURL(path.resolve(import.meta.dir, "../../src/cli/args.ts")).href;
+		for (const args of [
+			["--approval-floor", "always-ask", "--print", "ping"],
+			["--approval-floor", "always-ask", "--mode", "rpc"],
+			["--approval-floor", "always-ask", "--mode", "acp"],
+		]) {
+			const script = `
+				import { runRootCommand } from ${JSON.stringify(mainURL)};
+				import { parseArgs } from ${JSON.stringify(argsURL)};
+				const args = ${JSON.stringify(args)};
+				try {
+					await runRootCommand(parseArgs(args), args);
+				} catch (error) {
+					console.error(error instanceof Error ? error.message : String(error));
+					process.exit(1);
+				}
+			`;
+			const child = Bun.spawn([process.execPath, "--eval", script], {
+				cwd: tempDir,
+				stdin: "pipe",
+				stdout: "pipe",
+				stderr: "pipe",
+				// A real subprocess liveness deadline cannot use this process's fake clock.
+				signal: AbortSignal.timeout(5000),
+			});
+			try {
+				expect(await child.exited).toBe(1);
+				expect(await new Response(child.stderr).text()).toContain(
+					"--approval-floor always-ask requires an interactive session",
+				);
+			} finally {
+				if (child.exitCode === null) child.kill();
+				await child.exited;
+			}
+		}
+	});
+
+	it("requires a fresh approval for reloaded write and exec allows, while preserving read and deny", async () => {
+		const runner = session.extensionRunner;
+		if (!runner) throw new Error("Expected extension runner");
+		const prompts: string[] = [];
+		const previousGetUIContext = runner.getUIContext.bind(runner);
+		const previousHasUI = runner.hasUI.bind(runner);
+		runner.getUIContext = () => ({
+			...previousGetUIContext(),
+			select: async (prompt: string) => {
+				prompts.push(prompt);
+				return "Deny";
+			},
+		});
+		runner.hasUI = () => true;
+		try {
+			const readFile = path.join(tempDir, "cwd", "floor-read.txt");
+			fs.writeFileSync(readFile, "readable\n");
+			settings.override("tools.approvalMode", "yolo");
+			settings.override("tools.approval", { bash: "allow", read: "allow" });
+			const read = session.getToolByName("read");
+			const bash = session.getToolByName("bash");
+			if (!read || !bash) throw new Error("Expected read and bash tools");
+			const readResult = await read.execute("floor-read", { path: readFile });
+			expect(textOf(readResult)).toContain("readable");
+			expect(prompts).toEqual([]);
+
+			settings.override("tools.approvalMode", "yolo");
+			settings.override("tools.approval", { bash: "allow", read: "allow" });
+			await expect(bash.execute("floor-write", { command: "echo floor-write" })).rejects.toThrow(
+				/Tool call denied by user/,
+			);
+			expect(prompts).toHaveLength(1);
+			expect(prompts[0]).toContain("echo floor-write");
+
+			await expect(bash.execute("floor-exec", { command: "echo floor-exec" })).rejects.toThrow(
+				/Tool call denied by user/,
+			);
+			expect(prompts).toHaveLength(2);
+			expect(prompts[1]).toContain("echo floor-exec");
+
+			settings.override("tools.approval", { bash: "deny" });
+			await expect(bash.execute("floor-deny-ui", { command: "echo floor-exec" })).rejects.toThrow(
+				/blocked by user policy/,
+			);
+			expect(prompts).toHaveLength(2);
+		} finally {
+			runner.getUIContext = previousGetUIContext;
+			runner.hasUI = previousHasUI;
+		}
 	});
 
 	it("keeps deny stricter than the floor", async () => {

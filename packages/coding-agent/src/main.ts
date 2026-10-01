@@ -1673,6 +1673,13 @@ export async function runRootCommand(
 	rawArgs: string[],
 	deps: RunRootCommandDependencies = DEFAULT_RUN_ROOT_DEPENDENCIES,
 ): Promise<void> {
+	// Print and protocol are already non-interactive from argv. Refusing after
+	// readPipedInput waits forever when that pipe never reaches EOF.
+	if (parsed.approvalFloor && (parsed.print || parsed.mode !== undefined)) {
+		throw new Error(
+			"--approval-floor always-ask requires an interactive session; protocol and print modes are unsupported",
+		);
+	}
 	logger.startTiming();
 	startStartupWatchdog();
 	try {

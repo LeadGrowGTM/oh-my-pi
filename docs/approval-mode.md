@@ -39,7 +39,8 @@ not substitute for a fresh prompt under the floor. A session without an
 interactive UI rejects a write/exec call instead of granting it.
 
 The CLI rejects this flag in protocol, print, and piped-input modes; no claim is
-made that those hosts can prompt for every call. Headless task/eval subagents
+made that those hosts can prompt for every call. Print and protocol modes refuse
+before reading stdin, even when an input pipe stays open. Headless task/eval subagents
 inherit the floor, including nested and parked/revived subagents, and therefore
 reject their own write/exec calls rather than silently running them. Do not use
 this flag to authorize unattended child writes; the parent's approval of
