@@ -1829,16 +1829,18 @@ export class EventController {
 	 * The extension wrapper waits on `uiContext.select(...)` after emitting
 	 * `tool_execution_start`, so an approval-mode / per-tool `prompt` policy is
 	 * user-blocking — the title should read `attention`, not `working`. Mirrors
-	 * the wrapper's `resolveApproval` inputs (approvalMode + tools.approval); uses
-	 * `resolveApproval` rather than `requiresApproval` so a `deny` policy does not
-	 * throw in the render path.
+	 * the wrapper's `resolveApproval` inputs (approvalMode, tools.approval,
+	 * and the immutable session floor); uses `resolveApproval` rather than
+	 * `requiresApproval` so a `deny` policy does not throw in the render path.
 	 */
 	#toolWillPromptForApproval(toolName: string, args: unknown): boolean {
 		const tool = this.ctx.viewSession.getToolByName(toolName);
 		if (!tool) return false;
 		const mode = cfgToolsApprovalMode.get(settings);
 		const userPolicies: Record<string, unknown> = cfgToolsApproval.get(settings);
-		return resolveApproval(tool, args, mode, userPolicies).policy === "prompt";
+		return (
+			resolveApproval(tool, args, mode, userPolicies, this.ctx.viewSession.getApprovalFloor?.()).policy === "prompt"
+		);
 	}
 
 	async #handleToolExecutionUpdate(

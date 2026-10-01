@@ -85,6 +85,7 @@ export interface SecurityCoordinatorHost {
 	sessionId?: string;
 	agentId?: string;
 	asyncJobManager?: AsyncJobManager;
+	approvalFloor?: "always-ask";
 }
 
 export interface SecurityPreflightInput {
@@ -269,6 +270,7 @@ async function createDefaultSecuritySession(input: SecurityScanSessionFactoryInp
 		lspReadOnly: true,
 		hasUI: false,
 		autoApprove: true,
+		approvalFloor: input.host.approvalFloor,
 		skipPythonPreflight: true,
 		agentId: `Security-${input.scanId.slice(-12)}`,
 		agentDisplayName: "security",

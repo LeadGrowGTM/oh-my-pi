@@ -7,7 +7,7 @@ Tool approval has three inputs:
    - `write`: mutates workspace/session state but does not execute arbitrary code.
    - `exec`: executes code, shells out, drives a browser, spawns agents, or performs similarly broad actions.
 2. **Tool policy** — object-form declarations may set `policy: allow | deny | prompt`, optionally with `override`, a reason, and a `policyKey` for a dispatched sub-tool. This is used for argument-dependent safety/pattern rules.
-3. **User policy** — `tools.approval.<toolName>: allow | deny | prompt` overrides the active mode, but cannot bypass a tool's own deny/prompt policy or a non-yolo safety override.
+3. **User policy** — `tools.approval.<toolName>: allow | deny | prompt` overrides the active mode, but cannot bypass a tool's own deny/prompt policy, a non-yolo safety override, or an explicit runtime approval floor.
 
 Tools without an `approval` declaration, and decisions without a valid tier, use `exec`. This is the safe default for unknown custom tools. MCP server tools declare `write`, regardless of their MCP annotations.
 
@@ -23,11 +23,33 @@ Configure with `tools.approvalMode`:
 | `write`          | `read`, `write`         | `exec`          |
 | `yolo` (default) | `read`, `write`, `exec` | none            |
 
-`--approval-mode <mode>` overrides the configured mode for the session. `--auto-approve` and `--yolo` force yolo execution even when an explicit `--approval-mode` is also supplied; tool/user denies and explicit tool prompt policies still apply.
+`--approval-mode <mode>` overrides the configured mode for the session. `--auto-approve` and `--yolo` force yolo execution even when an explicit `--approval-mode` is also supplied, unless an explicit runtime approval floor is active; tool/user denies and explicit tool prompt policies still apply.
+
+### Interactive runtime floor
+
+Launch an interactive session with `omp --approval-floor always-ask` (also accepts
+`--approval-floor=always-ask`) to require a fresh manual prompt for every `write`
+or `exec` tier tool dispatch. This is a session-start constraint, not a settings
+value: live settings reloads, `tools.approvalMode: yolo`, `--yolo` /
+`--auto-approve`, per-tool `allow`, and tool-declared `allow` cannot lower it.
+Tool/user `deny` still denies; explicit prompts remain prompts. `read` tier
+calls keep their ordinary policy. The effective input after extension rewriting
+is checked again before execution. Prior `xd://` and ACP argument approvals do
+not substitute for a fresh prompt under the floor. A session without an
+interactive UI rejects a write/exec call instead of granting it.
+
+The CLI rejects this flag in protocol, print, and piped-input modes; no claim is
+made that those hosts can prompt for every call. Print and protocol modes refuse
+before reading stdin, even when an input pipe stays open. Headless task/eval subagents
+inherit the floor, including nested and parked/revived subagents, and therefore
+reject their own write/exec calls rather than silently running them. Do not use
+this flag to authorize unattended child writes; the parent's approval of
+`task` does not grant the child's individual calls. This is an approval gate,
+not OS-level containment against code executed after approval.
 
 ## User overrides
 
-`tools.approval` is honored in every mode:
+`tools.approval` is honored in every mode, subject to the runtime floor above:
 
 ```yaml
 tools:
@@ -57,7 +79,7 @@ Resolution per tool call:
 5. Without an override, an explicit tool `allow`/`prompt` policy wins, then a valid user policy wins.
 6. With no explicit policy, the active mode auto-approves or prompts by tier.
 
-Policy strings are trimmed and case-normalized. Invalid user values are ignored.
+Policy strings are trimmed and case-normalized. Invalid user values are ignored. With an explicit runtime floor, a `write`/`exec` allow in steps 3–6 is replaced by a prompt after deny resolution.
 
 Approval is resolved again after extension `tool_call` handlers revise the input, against the arguments that will actually execute. A deny blocks execution before a prompt; a call that still requires a prompt fails rather than silently allowing it when no interactive UI is available.
 
@@ -169,4 +191,4 @@ When ACP approval is required, OMP routes it through the ACP client instead of t
 
 ## Subagents
 
-Subagents run headless with `tools.approvalMode: yolo` so ordinary tier-based prompts do not stall them. The parent `task` approval is the authorization boundary. Per-tool policies still use the normal resolver: user `deny` remains absolute, and any call that resolves to `prompt` rejects because a headless subagent cannot satisfy it.
+Subagents normally run headless with `tools.approvalMode: yolo` so ordinary tier-based prompts do not stall them. The parent `task` approval is the authorization boundary. Per-tool policies still use the normal resolver: user `deny` remains absolute, `allow` permits it, and `prompt` cannot be satisfied in a headless subagent and rejects the call. Under `--approval-floor always-ask`, subagents inherit the immutable floor and all their write/exec calls reject without an interactive UI, including nested and cold-revived sessions.

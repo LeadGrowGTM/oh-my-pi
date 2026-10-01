@@ -85,6 +85,7 @@ export interface Args {
 	noUi?: boolean;
 	autoApprove?: boolean;
 	approvalMode?: "always-ask" | "write" | "yolo";
+	approvalFloor?: "always-ask";
 	messages: string[];
 	fileArgs: string[];
 	/** Extension-registered flags this parse recognized — name to value. */
@@ -224,6 +225,9 @@ export function parseArgs(inputArgs: string[], extensionFlags?: Map<string, { ty
 			// boundary sentinel: an extension-shadowable built-in like `--plan` (parsed
 			// here only when its boolean extension is NOT loaded) would otherwise swallow
 			// the marker as its value and drop the user's trailing message.
+			if (arg === "--approval-floor" && (i + 1 >= args.length || args[i + 1] === PROFILE_BOOTSTRAP_BOUNDARY_ARG)) {
+				throw new CliUsageError("--approval-floor requires a value: always-ask");
+			}
 			if (i + 1 < args.length && args[i + 1] !== PROFILE_BOOTSTRAP_BOUNDARY_ARG) {
 				const consumed = consumeBuiltInStringValue(arg, args, i + 1);
 				i = consumed.index;

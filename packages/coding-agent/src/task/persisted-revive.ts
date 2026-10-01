@@ -161,6 +161,7 @@ export function createPersistedSubagentReviverFactory(
 			const mcpProxyTools = mcpManager ? createMCPProxyTools(mcpManager) : [];
 			const { session } = await createAgentSession({
 				cwd: ctx.session.sessionManager.getCwd(),
+				approvalFloor: ctx.session.getApprovalFloor(),
 				authStorage: ctx.authStorage,
 				// Revived agents join the root session tree, so their observability
 				// frames ride the same bus the RPC/collab surfaces subscribed to.

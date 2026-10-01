@@ -30,7 +30,7 @@ import type {
 	InputEvent,
 	InputEventResult,
 } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
-import { ExtensionToolWrapper } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/wrapper";
+import { ExtensionToolWrapper, wrapRegisteredTool } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/wrapper";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { getProjectAgentDir, logger, TempDir } from "@oh-my-pi/pi-utils";
@@ -3719,6 +3719,63 @@ describe("ExtensionRunner", () => {
 			expect(promptedWith).not.toContain("original-command");
 			expect(executed).toEqual([{ command: "revised-command" }]);
 		});
+
+		it("the runtime floor prompts for each rewritten write even with tool and user allows", async () => {
+			const extCode = `
+				export default function(pi) {
+					pi.on("tool_call", event => {
+						if (event.toolName === "floor_rewrite") return { input: { command: "revised-write" } };
+					});
+				}
+			`;
+			fs.writeFileSync(path.join(extensionsDir, "floor-rewrite.ts"), extCode);
+			const loaded = await loadTestExtensions();
+			const runner = new ExtensionRunner(
+				loaded.extensions,
+				loaded.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				"always-ask",
+			);
+			const prompts: string[] = [];
+			initApprovalRunner(runner, async title => {
+				prompts.push(title);
+				return "Approve";
+			});
+			const executed: unknown[] = [];
+			const tool = {
+				name: "floor_rewrite",
+				label: "Floor rewrite",
+				description: "Test revised write",
+				parameters: Type.Object({ command: Type.String() }),
+				strict: true,
+				approval: (args: { command: string }) =>
+					args.command === "revised-write" ? { tier: "write" as const, policy: "allow" as const } : "read",
+				formatApprovalDetails: (args: { command: string }) => args.command,
+				execute: async (_id: string, args: unknown) => {
+					executed.push(args);
+					return { content: [{ type: "text", text: "ran" }] };
+				},
+			} as AgentTool;
+			const context = {
+				settings: Settings.isolated({ "tools.approvalMode": "yolo", "tools.approval": { floor_rewrite: "allow" } }),
+				autoApprove: true,
+				xdevApproved: true,
+				acpApprovedArgs: { command: "revised-write" },
+			} as never;
+			const wrapped = new ExtensionToolWrapper(tool, runner);
+			await wrapped.execute("floor-first", { command: "original-read" }, undefined, undefined, context);
+			await wrapped.execute("floor-second", { command: "original-read" }, undefined, undefined, context);
+			expect(prompts).toHaveLength(2);
+			expect(prompts[0]).toContain("revised-write");
+			expect(executed).toEqual([{ command: "revised-write" }, { command: "revised-write" }]);
+		});
 		it("skips wrapper emission when the loop already emitted tool_call for the dispatch", async () => {
 			// The agent loop emits tool_call at arg-prep time (session beforeToolCall
 			// wiring) and marks the dispatch on the runner; the wrapper must not fire
@@ -4445,6 +4502,41 @@ describe("ExtensionRunner", () => {
 	});
 
 	describe("invokeTool same-tool delegation", () => {
+		const initApprovalRunner = (
+			runner: ExtensionRunner,
+			select: (title: string, options: string[]) => Promise<string | undefined>,
+		) => {
+			runner.initialize(
+				{
+					sendMessage: () => {},
+					sendUserMessage: () => {},
+					appendEntry: () => {},
+					setLabel: () => {},
+					getActiveTools: () => [],
+					getAllTools: () => [],
+					setActiveTools: async () => {},
+					getCommands: () => [],
+					setModel: async () => false,
+					getThinkingLevel: () => undefined,
+					setThinkingLevel: () => {},
+					getSessionName: () => undefined,
+					setSessionName: async () => {},
+				} as never,
+				{
+					getModel: () => undefined,
+					isIdle: () => true,
+					abort: () => {},
+					hasPendingMessages: () => false,
+					shutdown: () => {},
+					getContextUsage: () => undefined,
+					compact: async () => {},
+					getSystemPrompt: () => [],
+				} as never,
+				undefined,
+				{ select, notify: () => {} } as never,
+			);
+		};
+
 		// Records what the native tool actually received, so the inherited abort/progress channels and
 		// the caller context are observable.
 		function nativeProbe(seen: { signal?: AbortSignal; onUpdate?: unknown; params?: unknown }): AgentTool {
@@ -4462,7 +4554,7 @@ describe("ExtensionRunner", () => {
 			} as AgentTool;
 		}
 
-		const runnerWithNative = async (native: AgentTool) => {
+		const runnerWithNative = async (native: AgentTool, approvalFloor?: "always-ask") => {
 			const result = await loadTestExtensions();
 			const runner = new ExtensionRunner(
 				result.extensions,
@@ -4470,6 +4562,12 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				approvalFloor,
 			);
 			runner.setNativeToolResolver(name =>
 				name === native.name ? { tool: native, makeContext: () => ({}) as never } : undefined,
@@ -4528,6 +4626,177 @@ describe("ExtensionRunner", () => {
 			);
 			// A fresh chain at depth 0 is unaffected by another chain's depth.
 			await expect(runner.invokeNativeTool("bash", { command: "echo hi" }, { depth: 0 })).resolves.toBeDefined();
+		});
+
+		it("rejects floored native exec delegation without a UI before it runs", async () => {
+			const seen: { params?: unknown } = {};
+			const runner = await runnerWithNative(nativeProbe(seen), "always-ask");
+
+			await expect(
+				runner.invokeNativeTool("bash", { command: "echo hi" }, { callerContext: { hasUI: false } as never }),
+			).rejects.toThrow(/requires approval but no interactive UI/);
+			expect(seen.params).toBeUndefined();
+		});
+
+		it("permits floored native read delegation", async () => {
+			const seen: { params?: unknown } = {};
+			const native = { ...nativeProbe(seen), approval: "read" as const };
+			const runner = await runnerWithNative(native, "always-ask");
+
+			await runner.invokeNativeTool("bash", { command: "echo hi" }, { callerContext: { hasUI: false } as never });
+
+			expect(seen.params).toEqual({ command: "echo hi" });
+		});
+
+		it("uses the runner UI for direct read replacement native exec approvals", async () => {
+			const seen: { params?: unknown } = {};
+			const runner = await runnerWithNative(nativeProbe(seen), "always-ask");
+			const prompts: string[] = [];
+			initApprovalRunner(runner, async prompt => {
+				prompts.push(prompt);
+				return prompts.length === 1 ? "Deny" : "Approve";
+			});
+			const replacement = wrapRegisteredTool(
+				{
+					definition: {
+						name: "bash",
+						label: "Read replacement bash",
+						description: "Delegates to native bash",
+						parameters: Type.Object({ command: Type.String() }),
+						approval: "read",
+						execute: async (
+							_id: string,
+							params: Record<string, unknown>,
+							_signal: AbortSignal | undefined,
+							_onUpdate: unknown,
+							context:
+								| (AgentToolContext & { invokeTool?: (params: Record<string, unknown>) => Promise<unknown> })
+								| undefined,
+						) => {
+							await context?.invokeTool?.(params);
+							return { content: [{ type: "text", text: "delegated" }] };
+						},
+					},
+				} as never,
+				runner,
+			);
+			const wrapped = new ExtensionToolWrapper(replacement, runner);
+
+			await expect(wrapped.execute("replacement-denied", { command: "echo denied" })).rejects.toThrow(
+				"Tool call denied by user: bash",
+			);
+			expect(seen.params).toBeUndefined();
+
+			await wrapped.execute("replacement-approved", { command: "echo approved" });
+			expect(prompts).toHaveLength(2);
+			expect(seen.params).toEqual({ command: "echo approved" });
+		});
+
+		it("requires a separate approval when a write replacement delegates to native exec", async () => {
+			const seen: { params?: unknown } = {};
+			const native = { ...nativeProbe(seen), approval: "exec" as const };
+			const runner = await runnerWithNative(native, "always-ask");
+			const choices = ["Approve", "Deny", "Approve", "Approve"];
+			initApprovalRunner(runner, async () => choices.shift());
+			const replacement = wrapRegisteredTool(
+				{
+					definition: {
+						name: "bash",
+						label: "Write replacement bash",
+						description: "Delegates to native bash",
+						parameters: Type.Object({ command: Type.String() }),
+						approval: "write",
+						execute: async (
+							_id: string,
+							params: Record<string, unknown>,
+							_signal: AbortSignal | undefined,
+							_onUpdate: unknown,
+							context:
+								| (AgentToolContext & { invokeTool?: (params: Record<string, unknown>) => Promise<unknown> })
+								| undefined,
+						) => {
+							await context?.invokeTool?.(params);
+							return { content: [{ type: "text", text: "delegated" }] };
+						},
+					},
+				} as never,
+				runner,
+			);
+			const wrapped = new ExtensionToolWrapper(replacement, runner);
+
+			await expect(wrapped.execute("write-to-exec-denied", { command: "echo denied" })).rejects.toThrow(
+				"Tool call denied by user: bash",
+			);
+			expect(seen.params).toBeUndefined();
+
+			await wrapped.execute("write-to-exec-approved", { command: "echo approved" });
+			expect(seen.params).toEqual({ command: "echo approved" });
+
+			runner.initialize({} as never, {} as never);
+			await expect(
+				wrapped.execute("write-to-exec-headless", { command: "echo headless" }, undefined, undefined, {
+					hasUI: false,
+				} as never),
+			).rejects.toThrow(/requires approval but no interactive UI/);
+			expect(seen.params).toEqual({ command: "echo approved" });
+		});
+
+		it("limits floored replacement delegation to one matching active call", async () => {
+			const seen: { params?: unknown } = {};
+			const runner = await runnerWithNative(nativeProbe(seen), "always-ask");
+			const prompts: string[] = [];
+			initApprovalRunner(runner, async prompt => {
+				prompts.push(prompt);
+				return prompts.length === 1 ? "Approve" : "Deny";
+			});
+			let savedContext: { invokeTool?: (params: Record<string, unknown>) => Promise<unknown> } | undefined;
+			let changedCallError: unknown;
+			const replacement = wrapRegisteredTool(
+				{
+					definition: {
+						name: "bash",
+						label: "Replacement bash",
+						description: "Delegates to native bash",
+						parameters: Type.Object({ command: Type.String() }),
+						approval: "exec",
+						execute: async (
+							_id: string,
+							params: Record<string, unknown>,
+							_signal: AbortSignal | undefined,
+							_onUpdate: unknown,
+							context:
+								| (AgentToolContext & { invokeTool?: (params: Record<string, unknown>) => Promise<unknown> })
+								| undefined,
+						) => {
+							savedContext = context;
+							await context?.invokeTool?.(params);
+							try {
+								await context?.invokeTool?.({ command: "touch unauthorized" });
+							} catch (error) {
+								changedCallError = error;
+							}
+							return { content: [{ type: "text", text: "delegated" }] };
+						},
+					},
+				} as never,
+				runner,
+			);
+			const wrapped = new ExtensionToolWrapper(replacement, runner);
+			const context = {
+				ui: runner.getUIContext(),
+				hasUI: true,
+				settings: Settings.isolated({ "tools.approvalMode": "yolo", "tools.approval": { bash: "allow" } }),
+			} as never;
+
+			await wrapped.execute("replacement-active", { command: "echo active" }, undefined, undefined, context);
+			expect(seen.params).toEqual({ command: "echo active" });
+			expect(changedCallError).toBeInstanceOf(Error);
+			expect(prompts).toHaveLength(2);
+
+			if (!savedContext?.invokeTool) throw new Error("Expected replacement to retain its extension context");
+			await expect(savedContext.invokeTool({ command: "echo retained" })).rejects.toThrow(/denied by user/);
+			expect(seen.params).toEqual({ command: "echo active" });
+			expect(prompts).toHaveLength(3);
 		});
 	});
 

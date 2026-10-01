@@ -1287,6 +1287,7 @@ export async function buildSessionOptions(
 		cwd: parsed.cwd ?? getProjectDir(),
 		autoApprove: parsed.autoApprove ?? false,
 	};
+	if (parsed.approvalFloor) options.approvalFloor = parsed.approvalFloor;
 	const restoringSession = Boolean(parsed.continue || parsed.resume || isForeignSessionImport(parsed));
 	if (parsed.serviceTier !== undefined) {
 		options.openAIServiceTier = serviceTierSettingToTier(parsed.serviceTier) ?? null;
@@ -1672,6 +1673,13 @@ export async function runRootCommand(
 	rawArgs: string[],
 	deps: RunRootCommandDependencies = DEFAULT_RUN_ROOT_DEPENDENCIES,
 ): Promise<void> {
+	// Print and protocol are already non-interactive from argv. Refusing after
+	// readPipedInput waits forever when that pipe never reaches EOF.
+	if (parsed.approvalFloor && (parsed.print || parsed.mode !== undefined)) {
+		throw new Error(
+			"--approval-floor always-ask requires an interactive session; protocol and print modes are unsupported",
+		);
+	}
 	logger.startTiming();
 	startStartupWatchdog();
 	try {
@@ -1759,6 +1767,11 @@ export async function runRootCommand(
 		// session-critical database connection picks the right busy timeout.
 		// See getDbBusyTimeoutMs().
 		const isProtocolMode = mode === "rpc" || mode === "rpc-ui" || mode === "acp";
+		if (parsedArgs.approvalFloor && process.stdin.isTTY !== true) {
+			throw new Error(
+				"--approval-floor always-ask requires an interactive session; protocol and print modes are unsupported",
+			);
+		}
 		// Protocol modes own stdin; treating it as prompt text would consume JSON-RPC frames before their transports start.
 		const pipedInput = isProtocolMode ? undefined : await logger.time("readPipedInput", readPipedInput);
 		// Without a terminal on stdin the TUI cannot run, so such a launch is always

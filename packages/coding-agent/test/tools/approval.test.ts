@@ -150,6 +150,28 @@ describe("resolveApproval override and user policy", () => {
 	});
 });
 
+describe("immutable approval floor", () => {
+	it("requires approval over tool and user grants in yolo, including keyed policies", () => {
+		const subject = tool("write", () => ({ tier: "write", policy: "allow", policyKey: "xd__device" }));
+		const policies = { write: "allow", xd__device: "allow" };
+		expect(resolveApproval(subject, {}, "yolo", policies, "always-ask").policy).toBe("prompt");
+		expect(requiresApproval(subject, {}, "yolo", policies, "always-ask").required).toBe(true);
+		expect(resolveApproval(tool("bash", "exec"), {}, "write", { bash: "allow" }, "always-ask").policy).toBe("prompt");
+		expect(resolveApproval(tool("read", "read"), {}, "yolo", {}, "always-ask").policy).toBe("allow");
+	});
+
+	it("preserves deny and a stricter prompt while allowing grants without the floor", () => {
+		expect(resolveApproval(tool("write", "write"), {}, "yolo", { write: "deny" }, "always-ask").policy).toBe("deny");
+		expect(resolveApproval(tool("bash", { tier: "exec", policy: "deny" }), {}, "yolo", {}, "always-ask").policy).toBe(
+			"deny",
+		);
+		expect(
+			resolveApproval(tool("bash", { tier: "exec", policy: "prompt" }), {}, "yolo", {}, "always-ask"),
+		).toMatchObject({ policy: "prompt", source: "tool" });
+		expect(resolveApproval(tool("write", "write"), {}, "yolo", { write: "allow" }).policy).toBe("allow");
+	});
+});
+
 describe("MCP fallback and prompt formatting", () => {
 	it("treats MCP tools without approval declarations as exec tier", () => {
 		const subject = tool("mcp__server__dangerous");
@@ -918,9 +940,11 @@ describe("tool-owned dynamic approval declarations", () => {
 
 describe("resolveApprovalFromContext fail-closed default", () => {
 	it("fails closed to always-ask with no grant when context is missing", () => {
-		expect(resolveApprovalFromContext(undefined)).toEqual({ approvalMode: "always-ask", userPolicies: {} });
-		expect(resolveApprovalFromContext(null)).toEqual({ approvalMode: "always-ask", userPolicies: {} });
-		expect(resolveApprovalFromContext({})).toEqual({ approvalMode: "always-ask", userPolicies: {} });
+		for (const context of [undefined, null, {}]) {
+			const { approvalMode, userPolicies } = resolveApprovalFromContext(context);
+			expect(approvalMode).toBe("always-ask");
+			expect(userPolicies).toEqual({});
+		}
 	});
 
 	it("does not allow an exec-tier tool when context is missing", () => {
@@ -929,31 +953,31 @@ describe("resolveApprovalFromContext fail-closed default", () => {
 	});
 
 	it("honors configured mode and per-tool policies when settings are present", () => {
-		expect(
-			resolveApprovalFromContext({
-				settings: Settings.isolated({ "tools.approvalMode": "write", "tools.approval": { bash: "deny" } }),
-			}),
-		).toEqual({ approvalMode: "write", userPolicies: { bash: "deny" } });
-		expect(resolveApprovalFromContext({ settings: Settings.isolated({ "tools.approvalMode": "yolo" }) })).toEqual({
-			approvalMode: "yolo",
-			userPolicies: {},
+		const denied = resolveApprovalFromContext({
+			settings: Settings.isolated({ "tools.approvalMode": "write", "tools.approval": { bash: "deny" } }),
 		});
+		expect(denied.approvalMode).toBe("write");
+		expect(denied.userPolicies).toEqual({ bash: "deny" });
+		const yolo = resolveApprovalFromContext({ settings: Settings.isolated({ "tools.approvalMode": "yolo" }) });
+		expect(yolo.approvalMode).toBe("yolo");
+		expect(yolo.userPolicies).toEqual({});
 	});
 
 	it("keeps the schema default yolo when settings exist but approvalMode is unset", () => {
-		expect(resolveApprovalFromContext({ settings: Settings.isolated() })).toEqual({
-			approvalMode: "yolo",
-			userPolicies: {},
-		});
+		const resolved = resolveApprovalFromContext({ settings: Settings.isolated() });
+		expect(resolved.approvalMode).toBe("yolo");
+		expect(resolved.userPolicies).toEqual({});
 	});
 
 	it("lets --auto-approve force yolo while still reading user policies", () => {
-		expect(
-			resolveApprovalFromContext({
-				autoApprove: true,
-				settings: Settings.isolated({ "tools.approvalMode": "always-ask", "tools.approval": { bash: "deny" } }),
-			}),
-		).toEqual({ approvalMode: "yolo", userPolicies: { bash: "deny" } });
-		expect(resolveApprovalFromContext({ autoApprove: true })).toEqual({ approvalMode: "yolo", userPolicies: {} });
+		const denied = resolveApprovalFromContext({
+			autoApprove: true,
+			settings: Settings.isolated({ "tools.approvalMode": "always-ask", "tools.approval": { bash: "deny" } }),
+		});
+		expect(denied.approvalMode).toBe("yolo");
+		expect(denied.userPolicies).toEqual({ bash: "deny" });
+		const autoApproved = resolveApprovalFromContext({ autoApprove: true });
+		expect(autoApproved.approvalMode).toBe("yolo");
+		expect(autoApproved.userPolicies).toEqual({});
 	});
 });

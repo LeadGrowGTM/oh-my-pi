@@ -26,7 +26,7 @@ import {
 	setContextHistoryIndex,
 } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import type { KeyId } from "@oh-my-pi/pi-tui";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger, untilAborted } from "@oh-my-pi/pi-utils";
 import { MAIN_AGENT_RULE_NAME } from "../../capability/rule";
 import type { ModelRegistry } from "../../config/model-registry";
 import { type Settings, withActiveSettings } from "../../config/settings";
@@ -37,6 +37,13 @@ import type { AsyncJobSnapshot } from "../../session/agent-session";
 import { MAIN_AGENT_ID } from "../../registry/agent-registry";
 import type { SessionManager } from "../../session/session-manager";
 import { addFileDeleteFallback, addFileWriteFallback } from "../../tools/file-write-fallback";
+import {
+	denyError,
+	formatApprovalPrompt,
+	resolveApproval,
+	resolveApprovalFromContext,
+	type ToolTier,
+} from "../../tools/approval";
 import type { BranchHandler, NavigateTreeHandler, NewSessionHandler } from "../session-handler-types";
 import { accumulateToolCallResult, buildAggregatedToolCallResult } from "../shared-events";
 import { ManagedTimers } from "./managed-timers";
@@ -487,6 +494,7 @@ export const TOP_LEVEL_AGENT: ExtensionAgentIdentity = Object.freeze({
 
 export class ExtensionRunner {
 	#uiContext: ExtensionUIContext;
+	#approvalFloorGrants = new WeakMap<object, { name: string; params: Record<string, unknown>; tier: ToolTier }>();
 	#mode: ExtensionMode = "print";
 	#toolApprovalPreviewWaiter?: (toolCallId: string) => Promise<void>;
 	#errorListeners: Set<ExtensionErrorListener> = new Set();
@@ -690,12 +698,66 @@ export class ExtensionRunner {
 			throw new Error(`invokeTool: delegation depth exceeded 8 (recursive invokeTool for "${name}"?)`);
 		}
 		const toolCallId = `invoke-${name}-${Date.now().toString(36)}-${depth}`;
+		const callerContext = options?.callerContext;
+		if (this.approvalFloor === "always-ask") {
+			const { approvalMode, userPolicies } = resolveApprovalFromContext(
+				callerContext ?? (this.settings ? { settings: this.settings } : undefined),
+			);
+			const approval = resolveApproval(resolved.tool, params, approvalMode, userPolicies, this.approvalFloor);
+			if (approval.policy === "deny") throw denyError(approval, resolved.tool.name);
+			const grant = callerContext ? this.#approvalFloorGrants.get(callerContext) : undefined;
+			const delegatedApproval =
+				grant !== undefined &&
+				grant.name === name &&
+				grant.tier === approval.tier &&
+				Bun.deepEquals(grant.params, params);
+			if (delegatedApproval && callerContext) this.#approvalFloorGrants.delete(callerContext);
+			if (approval.policy === "prompt" && !delegatedApproval) {
+				if (!this.hasUI()) {
+					throw new Error(
+						`Tool "${resolved.tool.name}" requires approval but no interactive UI available. ` +
+							"The session approval floor cannot be lowered by settings or per-tool allow.",
+					);
+				}
+				const hasApprovalHandlers =
+					this.hasHandlers("tool_approval_requested") || this.hasHandlers("tool_approval_resolved");
+				const sessionId = callerContext?.sessionManager?.getSessionId() ?? "";
+				if (hasApprovalHandlers) {
+					await this.emit({
+						type: "tool_approval_requested",
+						sessionId,
+						toolName: resolved.tool.name,
+						toolCallId,
+						...(approval.reason ? { reason: approval.reason } : {}),
+						approvalMode,
+					});
+				}
+				const choice = await untilAborted(options?.signal, () =>
+					this.getUIContext().select(formatApprovalPrompt(resolved.tool, params, approval.reason), [
+						"Approve",
+						"Deny",
+					]),
+				);
+				const approved = choice === "Approve";
+				if (hasApprovalHandlers) {
+					await this.emit({
+						type: "tool_approval_resolved",
+						sessionId,
+						toolName: resolved.tool.name,
+						toolCallId,
+						approved,
+						...(!approved ? { reason: "denied by user" } : {}),
+					});
+				}
+				if (!approved) throw new Error(`Tool call denied by user: ${resolved.tool.name}`);
+			}
+		}
 		return (await resolved.tool.execute(
 			toolCallId,
 			params as never,
 			options?.signal,
 			options?.onUpdate as never,
-			options?.callerContext ?? resolved.makeContext(),
+			callerContext ?? resolved.makeContext(),
 		)) as AgentToolResult<TDetails>;
 	}
 
@@ -712,10 +774,21 @@ export class ExtensionRunner {
 		getAsyncJobSnapshot?: () => AsyncJobSnapshot | null,
 		/** Identity of the agent this runner's session runs; defaults to the top-level agent. */
 		private readonly agent: ExtensionAgentIdentity = TOP_LEVEL_AGENT,
+		readonly approvalFloor?: "always-ask",
 	) {
 		this.#uiContext = noOpUIContext;
 		this.#getMemoryFn = getMemory;
 		this.#getAsyncJobSnapshotFn = getAsyncJobSnapshot ?? (() => null);
+	}
+
+	grantApprovalFloorDelegation(
+		context: object,
+		name: string,
+		params: Record<string, unknown>,
+		tier: ToolTier,
+	): () => void {
+		this.#approvalFloorGrants.set(context, { name, params: structuredClone(params), tier });
+		return () => this.#approvalFloorGrants.delete(context);
 	}
 
 	/**

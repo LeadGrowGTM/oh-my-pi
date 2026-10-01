@@ -233,7 +233,7 @@ describe("task speculative launch", () => {
 describe("speculative launch authorization", () => {
 	it("allows launches only under auto-allow approval without lifecycle handlers", async () => {
 		const launch = { tool: { name: "task", approval: "exec" as const }, toolCall, args: { context: "ctx" } };
-		const authorize = (approvalMode: string, handlers: boolean) => {
+		const authorize = (approvalMode: string, handlers: boolean, approvalFloor?: "always-ask") => {
 			const settings = Settings.isolated({ "tools.approvalMode": approvalMode });
 			const session = {
 				cwd: "/tmp",
@@ -241,6 +241,7 @@ describe("speculative launch authorization", () => {
 				getSessionFile: () => null,
 				getSessionSpawns: () => "*",
 				settings,
+				approvalFloor,
 			};
 			return createSpeculativeToolExecutionConfig(settings, session, {
 				hasHandlers: event => handlers && event === "tool_call",
@@ -248,6 +249,7 @@ describe("speculative launch authorization", () => {
 		};
 
 		expect(await authorize("yolo", false)).toMatchObject({ allowed: true });
+		expect(await authorize("yolo", false, "always-ask")).toMatchObject({ allowed: false });
 		expect(await authorize("yolo", true)).toMatchObject({ allowed: false });
 		expect(await authorize("always-ask", false)).toMatchObject({ allowed: false });
 	});

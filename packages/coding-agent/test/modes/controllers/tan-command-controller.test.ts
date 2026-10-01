@@ -137,6 +137,7 @@ function createContext(overrides?: {
 		effectiveExtensionRoots: overrides?.effectiveExtensionRoots,
 		extensionPaths: overrides?.extensionPaths,
 		getAgentId: vi.fn(() => overrides?.agentId),
+		getApprovalFloor: vi.fn(() => undefined),
 		sendCustomMessage: vi.fn(async () => {
 			sequence.push("sendCustomMessage");
 		}),

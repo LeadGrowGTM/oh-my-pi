@@ -203,6 +203,7 @@ function createFactory(cwd: string, eventBus?: EventBus, owner: ReviveOwnerOptio
 			getCwd: () => cwd,
 			getArtifactManager: () => undefined,
 		},
+		getApprovalFloor: () => undefined,
 		get sessionFile() {
 			return path.join(cwd, "parent.jsonl");
 		},

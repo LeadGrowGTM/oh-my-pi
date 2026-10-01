@@ -237,6 +237,12 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
 		}
 		result.approvalMode = value;
 	},
+	"--approval-floor": (result, value) => {
+		if (value !== "always-ask") {
+			throw new CliUsageError(`Invalid --approval-floor value "${value}": expected always-ask`);
+		}
+		result.approvalFloor = value;
+	},
 };
 
 /**

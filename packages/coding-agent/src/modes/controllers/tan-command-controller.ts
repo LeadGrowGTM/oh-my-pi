@@ -176,6 +176,7 @@ export class TanCommandController {
 							preloadedExtensionPaths: parentExtensionPaths?.length ? [...parentExtensionPaths] : undefined,
 							extensionRoots: () => parentExtensionRoots,
 							localProtocolOptions,
+							approvalFloor: this.ctx.session.getApprovalFloor(),
 						});
 						clone = created.session;
 						clone.sessionManager?.appendSessionInit?.({

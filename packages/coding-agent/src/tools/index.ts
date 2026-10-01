@@ -216,6 +216,8 @@ export interface ToolSession {
 	canPromptUser?: boolean;
 	/** The user approves `cfg://` writes for this session (top-level TUI session only). */
 	settingsApproval?: boolean;
+	/** Inherited immutable approval floor for this session and its descendants. */
+	approvalFloor?: "always-ask";
 	/** Whether this session has begun disposal. */
 	isDisposed?: () => boolean;
 	/**

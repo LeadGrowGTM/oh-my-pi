@@ -837,6 +837,8 @@ export interface CreateAgentSessionOptions {
 
 	/** Whether to auto-approve all tool calls (--auto-approve CLI flag). Default: false */
 	autoApprove?: boolean;
+	/** Immutable session-start approval floor; independent of reloadable settings. */
+	approvalFloor?: "always-ask";
 }
 
 /** Result from createAgentSession */
@@ -1620,6 +1622,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 }
 
 async function createAgentSessionScoped(options: CreateAgentSessionOptions): Promise<CreateAgentSessionResult> {
+	const approvalFloor = options.approvalFloor;
 	if (options.systemPromptTemplate !== undefined && options.customSystemPrompt !== undefined) {
 		throw new Error("systemPromptTemplate cannot be combined with a literal custom system prompt");
 	}
@@ -2160,6 +2163,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			hasUI: options.hasUI ?? false,
 			canPromptUser: options.interactivePrompts ?? options.hasUI ?? false,
 			settingsApproval: options.settingsApproval === true && !isSubagentSession,
+			approvalFloor,
 			// Explicit resolvers retain their existing pass-through contract. Ordinary
 			// sessions inherit stored affinity into the child's own provider session.
 			getApiKey: options.getApiKey,
@@ -3237,6 +3241,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				depth: taskDepth,
 				...(options.parentAgentId ? { parentId: options.parentAgentId } : {}),
 			}),
+			approvalFloor,
 		);
 
 		credentialDisabledTarget = extensionRunner;
@@ -3257,6 +3262,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			settings,
 			localProtocolOptions,
 			autoApprove: options.autoApprove ?? false,
+			approvalFloor,
 		});
 		const toolContextStore = new ToolContextStore(getSessionContext);
 		toolSession.getToolContext = () => toolContextStore.getContext();
