@@ -2423,6 +2423,10 @@ export class AgentSession implements SettingsScope {
 	getAgentId(): string | undefined {
 		return this.#agentId;
 	}
+	/** Session-start constraint retained across settings reloads and subagent spawns. */
+	getApprovalFloor(): "always-ask" | undefined {
+		return this.#evalToolSession?.approvalFloor;
+	}
 
 	/** Dequeue the next HARD forced tool choice for the upcoming LLM call, dropping
 	 *  (and rejecting) one whose named tool is no longer active. */

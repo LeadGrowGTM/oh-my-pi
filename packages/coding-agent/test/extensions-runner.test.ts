@@ -3719,6 +3719,62 @@ describe("ExtensionRunner", () => {
 			expect(promptedWith).not.toContain("original-command");
 			expect(executed).toEqual([{ command: "revised-command" }]);
 		});
+
+		it("the runtime floor prompts for each rewritten write even with tool and user allows", async () => {
+			const extCode = `
+				export default function(pi) {
+					pi.on("tool_call", event => {
+						if (event.toolName === "floor_rewrite") return { input: { command: "revised-write" } };
+					});
+				}
+			`;
+			fs.writeFileSync(path.join(extensionsDir, "floor-rewrite.ts"), extCode);
+			const loaded = await loadTestExtensions();
+			const runner = new ExtensionRunner(
+				loaded.extensions,
+				loaded.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				"always-ask",
+			);
+			const prompts: string[] = [];
+			initApprovalRunner(runner, async title => {
+				prompts.push(title);
+				return "Approve";
+			});
+			const executed: unknown[] = [];
+			const tool = {
+				name: "floor_rewrite",
+				label: "Floor rewrite",
+				description: "Test revised write",
+				parameters: Type.Object({ command: Type.String() }),
+				strict: true,
+				approval: (args: { command: string }) =>
+					args.command === "revised-write" ? { tier: "write" as const, policy: "allow" as const } : "read",
+				formatApprovalDetails: (args: { command: string }) => args.command,
+				execute: async (_id: string, args: unknown) => {
+					executed.push(args);
+					return { content: [{ type: "text", text: "ran" }] };
+				},
+			} as AgentTool;
+			const context = {
+				settings: { get: (key: string) => (key === "tools.approvalMode" ? "yolo" : { floor_rewrite: "allow" }) },
+				autoApprove: true,
+				xdevApproved: true,
+				acpApprovedArgs: { command: "revised-write" },
+			} as never;
+			const wrapped = new ExtensionToolWrapper(tool, runner);
+			await wrapped.execute("floor-first", { command: "original-read" }, undefined, undefined, context);
+			await wrapped.execute("floor-second", { command: "original-read" }, undefined, undefined, context);
+			expect(prompts).toHaveLength(2);
+			expect(prompts[0]).toContain("revised-write");
+			expect(executed).toEqual([{ command: "revised-write" }, { command: "revised-write" }]);
+		});
 		it("skips wrapper emission when the loop already emitted tool_call for the dispatch", async () => {
 			// The agent loop emits tool_call at arg-prep time (session beforeToolCall
 			// wiring) and marks the dispatch on the runner; the wrapper must not fire

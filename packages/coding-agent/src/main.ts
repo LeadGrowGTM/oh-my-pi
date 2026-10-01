@@ -1287,6 +1287,7 @@ export async function buildSessionOptions(
 		cwd: parsed.cwd ?? getProjectDir(),
 		autoApprove: parsed.autoApprove ?? false,
 	};
+	if (parsed.approvalFloor) options.approvalFloor = parsed.approvalFloor;
 	const restoringSession = Boolean(parsed.continue || parsed.resume || isForeignSessionImport(parsed));
 	if (parsed.serviceTier !== undefined) {
 		options.openAIServiceTier = serviceTierSettingToTier(parsed.serviceTier) ?? null;
@@ -1759,6 +1760,14 @@ export async function runRootCommand(
 		// session-critical database connection picks the right busy timeout.
 		// See getDbBusyTimeoutMs().
 		const isProtocolMode = mode === "rpc" || mode === "rpc-ui" || mode === "acp";
+		if (
+			parsedArgs.approvalFloor &&
+			(isProtocolMode || parsedArgs.print || parsedArgs.mode !== undefined || process.stdin.isTTY !== true)
+		) {
+			throw new Error(
+				"--approval-floor always-ask requires an interactive session; protocol and print modes are unsupported",
+			);
+		}
 		// Protocol modes own stdin; treating it as prompt text would consume JSON-RPC frames before their transports start.
 		const pipedInput = isProtocolMode ? undefined : await logger.time("readPipedInput", readPipedInput);
 		// Without a terminal on stdin the TUI cannot run, so such a launch is always
@@ -1783,6 +1792,11 @@ export async function runRootCommand(
 			parsedArgs.invalidFlagValues.length === 0
 		) {
 			exitWithoutTerminal();
+		}
+		if (parsedArgs.approvalFloor && !isInteractive) {
+			throw new Error(
+				"--approval-floor always-ask requires an interactive session; protocol and print modes are unsupported",
+			);
 		}
 		// Only the interactive host renders a focusable Agent Hub / subagent session
 		// tree; declare it so headless subagent optimizations (e.g. skipping replan

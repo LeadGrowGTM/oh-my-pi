@@ -488,6 +488,7 @@ function buildExecutorOptions(
 	return {
 		cwd: session.cwd,
 		additionalDirectories: session.additionalDirectories,
+		approvalFloor: session.approvalFloor,
 		getApiKey: session.getApiKey,
 		credentialSourceSessionId: session.getCredentialSourceSessionId?.(),
 		agent: policy.effectiveAgent,

@@ -1282,6 +1282,7 @@ export class VibeSessionRegistry {
 		const localProtocolOptions = sessionLocalProtocolOptions(session);
 		return {
 			cwd: session.cwd,
+			approvalFloor: session.approvalFloor,
 			agent: record.agent,
 			task: message,
 			assignment: message,

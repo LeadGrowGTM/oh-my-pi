@@ -712,6 +712,7 @@ export class ExtensionRunner {
 		getAsyncJobSnapshot?: () => AsyncJobSnapshot | null,
 		/** Identity of the agent this runner's session runs; defaults to the top-level agent. */
 		private readonly agent: ExtensionAgentIdentity = TOP_LEVEL_AGENT,
+		readonly approvalFloor?: "always-ask",
 	) {
 		this.#uiContext = noOpUIContext;
 		this.#getMemoryFn = getMemory;

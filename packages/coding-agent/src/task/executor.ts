@@ -417,6 +417,8 @@ export interface ExecutorOptions {
 	cwd: string;
 	/** Additional workspace directories to seed on the subagent session (multi-root). */
 	additionalDirectories?: string[];
+	/** Immutable approval floor inherited from the spawning session. */
+	approvalFloor?: "always-ask";
 	/** Exact provider credential resolver inherited from the parent session. */
 	getApiKey?: CreateAgentSessionOptions["getApiKey"];
 	/** Parent session whose stored credential affinities seed the child session. */
@@ -3980,6 +3982,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			): CreateAgentSessionOptions => ({
 				cwd: worktree ?? cwd,
 				additionalDirectories: worktree !== undefined ? undefined : options.additionalDirectories,
+				approvalFloor: options.approvalFloor,
 				authStorage,
 				modelRegistry,
 				getApiKey: options.getApiKey,

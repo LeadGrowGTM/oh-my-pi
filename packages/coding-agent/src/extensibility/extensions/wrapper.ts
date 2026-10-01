@@ -239,7 +239,13 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 		const { approvalMode, userPolicies } = resolveApprovalFromContext(
 			context ?? (this.runner.sessionSettings ? { settings: this.runner.sessionSettings } : undefined),
 		);
-		const preResolved = resolveApproval(this.tool, approvalArgs(params, context), approvalMode, userPolicies);
+		const preResolved = resolveApproval(
+			this.tool,
+			approvalArgs(params, context),
+			approvalMode,
+			userPolicies,
+			this.runner.approvalFloor,
+		);
 		if (preResolved.policy === "deny") {
 			throw denyError(preResolved, this.tool.name);
 		}
@@ -310,28 +316,26 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 		// input that newly resolves to `deny` is caught here even though the original passed the
 		// short-circuit above.
 		const resolvedArgs = approvalArgs(effectiveParams, context);
-		const resolved = resolveApproval(this.tool, resolvedArgs, approvalMode, userPolicies);
+		const resolved = resolveApproval(this.tool, resolvedArgs, approvalMode, userPolicies, this.runner.approvalFloor);
 		context?.xdevTierResolved?.(resolved.tier);
 		if (resolved.policy === "deny") {
 			cancelPreflight();
 			throw denyError(resolved, this.tool.name);
 		}
 		const pendingSafetyChecks = computerSafetyChecks(context);
-		// Outer approvals only cover the original input. `xd://` approval skips
-		// tier-only prompts while the same object flows through; ACP approval also
-		// satisfies explicit prompts, but compares against a deep snapshot because
-		// handlers can mutate the original argument object in place. Denies were
-		// enforced above, and provider safety checks remain independently required.
+		// Outer xd:// and ACP grants may suppress prompts only without a floor.
+		// Under the floor every write/exec dispatch needs its own interactive approval.
 		const explicitPrompt = resolved.override || Object.hasOwn(userPolicies, resolved.policyKey ?? this.tool.name);
 		const xdevBypass = context?.xdevApproved === true && effectiveParams === params;
 		const acpBypass =
 			context !== undefined &&
 			Object.hasOwn(context, "acpApprovedArgs") &&
 			Bun.deepEquals(effectiveParams, context.acpApprovedArgs);
+		const floorPrompt = this.runner.approvalFloor === "always-ask" && resolved.tier !== "read";
 		const approvalCheck = {
 			required:
 				pendingSafetyChecks.length > 0 ||
-				(resolved.policy === "prompt" && !acpBypass && (explicitPrompt || !xdevBypass)),
+				(resolved.policy === "prompt" && (floorPrompt || (!acpBypass && (explicitPrompt || !xdevBypass)))),
 			reason: resolved.reason,
 		};
 
@@ -379,6 +383,12 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 				if (pendingSafetyChecks.length > 0) {
 					throw new Error(
 						`Tool "${this.tool.name}" has pending provider safety checks but no interactive UI is available.`,
+					);
+				}
+				if (floorPrompt) {
+					throw new Error(
+						`Tool "${this.tool.name}" requires approval but no interactive UI available. ` +
+							`The session approval floor cannot be lowered by settings or per-tool allow.`,
 					);
 				}
 				throw new Error(

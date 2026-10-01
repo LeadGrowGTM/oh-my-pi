@@ -96,16 +96,13 @@ async function approvePreludeInvocation(
 	);
 	const subject: { name: string; approval?: ToolApproval } = { name: definition.name };
 	if (definition.approval !== undefined) subject.approval = definition.approval;
-	const resolved = resolveApproval(subject, parameters, mode, policies);
+	const resolved = resolveApproval(subject, parameters, mode, policies, context.session.approvalFloor);
 	if (resolved.policy === "deny") throw denyError(resolved, definition.name);
 	if (resolved.policy !== "prompt") return;
 
 	const ui = context.context?.ui;
 	if (!ui || context.context?.hasUI === false) {
-		throw new Error(
-			`Eval prelude "${definition.name}" requires approval but no interactive UI is available.\n` +
-				`Set tools.approval.${definition.name}: allow or use an interactive UI to approve the call.`,
-		);
+		throw new Error(`Eval prelude "${definition.name}" requires approval but no interactive UI is available.`);
 	}
 	const choice = await untilAborted(context.signal, () =>
 		ui.select(formatApprovalPrompt(subject, parameters, resolved.reason), ["Approve", "Deny"]),

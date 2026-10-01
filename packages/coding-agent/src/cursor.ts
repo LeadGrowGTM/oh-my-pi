@@ -348,12 +348,13 @@ function allowsDirectFileMutation(options: CursorExecBridgeOptions): boolean {
  * proceed, or the refusal text to answer with.
  */
 function refuseByWritePolicy(options: CursorExecBridgeOptions, toolName: string, pathArg: string): string | null {
-	const { approvalMode, userPolicies } = resolveApprovalFromContext(options.getToolContext?.());
+	const { approvalMode, userPolicies, approvalFloor } = resolveApprovalFromContext(options.getToolContext?.());
 	const approval = resolveApproval(
 		{ name: toolName, approval: "write" },
 		{ path: pathArg },
 		approvalMode,
 		userPolicies,
+		approvalFloor,
 	);
 	if (approval.policy === "allow") return null;
 	return approval.policy === "deny"
@@ -1070,12 +1071,13 @@ export class CursorExecHandlers implements ICursorExecHandlers {
 			? this.options.getEditReplaceTool?.()
 			: (this.options.getExecutableTool?.(toolName) ?? this.options.tools.get(toolName));
 		if (!tool) return false;
-		const { approvalMode, userPolicies } = resolveApprovalFromContext(this.options.getToolContext?.());
+		const { approvalMode, userPolicies, approvalFloor } = resolveApprovalFromContext(this.options.getToolContext?.());
 		const approval = resolveApproval(
 			tool,
 			preferReplace ? normalizeCursorReplaceArgs(args) : args,
 			approvalMode,
 			userPolicies,
+			approvalFloor,
 		);
 		return approval.policy === "allow";
 	}

@@ -112,6 +112,10 @@ export const launchHelp = {
 			options: ["always-ask", "write", "yolo"],
 			description: "Override tools.approvalMode for this session (always-ask|write|yolo)",
 		}),
+		"approval-floor": Flags.string({
+			options: ["always-ask"],
+			description: "Require a prompt for write and exec tools regardless of per-tool allow or approval mode",
+		}),
 	},
 	examples: [
 		`# Interactive mode\n  ${APP_NAME}`,

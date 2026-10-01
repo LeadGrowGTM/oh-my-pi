@@ -150,6 +150,28 @@ describe("resolveApproval override and user policy", () => {
 	});
 });
 
+describe("immutable approval floor", () => {
+	it("requires approval over tool and user grants in yolo, including keyed policies", () => {
+		const subject = tool("write", () => ({ tier: "write", policy: "allow", policyKey: "xd__device" }));
+		const policies = { write: "allow", xd__device: "allow" };
+		expect(resolveApproval(subject, {}, "yolo", policies, "always-ask").policy).toBe("prompt");
+		expect(requiresApproval(subject, {}, "yolo", policies, "always-ask").required).toBe(true);
+		expect(resolveApproval(tool("bash", "exec"), {}, "write", { bash: "allow" }, "always-ask").policy).toBe("prompt");
+		expect(resolveApproval(tool("read", "read"), {}, "yolo", {}, "always-ask").policy).toBe("allow");
+	});
+
+	it("preserves deny and a stricter prompt while allowing grants without the floor", () => {
+		expect(resolveApproval(tool("write", "write"), {}, "yolo", { write: "deny" }, "always-ask").policy).toBe("deny");
+		expect(resolveApproval(tool("bash", { tier: "exec", policy: "deny" }), {}, "yolo", {}, "always-ask").policy).toBe(
+			"deny",
+		);
+		expect(
+			resolveApproval(tool("bash", { tier: "exec", policy: "prompt" }), {}, "yolo", {}, "always-ask"),
+		).toMatchObject({ policy: "prompt", source: "tool" });
+		expect(resolveApproval(tool("write", "write"), {}, "yolo", { write: "allow" }).policy).toBe("allow");
+	});
+});
+
 describe("MCP fallback and prompt formatting", () => {
 	it("treats MCP tools without approval declarations as exec tier", () => {
 		const subject = tool("mcp__server__dangerous");

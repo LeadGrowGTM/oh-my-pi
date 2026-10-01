@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentToolContext } from "@oh-my-pi/pi-agent-core";
+import { parseArgs } from "@oh-my-pi/pi-coding-agent/cli/args";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
@@ -303,5 +304,88 @@ describe("tools.approvalMode setting", () => {
 				},
 			} as never),
 		).rejects.toThrow(/pending provider safety checks but no interactive UI/);
+	});
+});
+
+describe("--approval-floor always-ask", () => {
+	let tempDir: string;
+	let session: AgentSession;
+	let settings: Settings;
+
+	beforeAll(async () => {
+		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `pi-approval-floor-${Snowflake.next()}-`));
+		const cwd = path.join(tempDir, "cwd");
+		fs.mkdirSync(cwd, { recursive: true });
+		settings = Settings.isolated({
+			...BASE_SETTINGS,
+			"tools.approvalMode": "yolo",
+			"tools.approval": { bash: "allow" },
+		});
+		({ session } = await createAgentSession({
+			cwd,
+			agentDir: tempDir,
+			sessionManager: SessionManager.create(cwd, path.join(tempDir, "sessions")),
+			settings,
+			approvalFloor: "always-ask",
+			model: getBundledModel("openai", "gpt-4o-mini"),
+			disableExtensionDiscovery: true,
+			skills: [],
+			contextFiles: [],
+			workspaceTree: emptyWorkspaceTree(cwd),
+			promptTemplates: [],
+			slashCommands: [],
+			enableMCP: false,
+			enableLsp: false,
+			toolNames: ["bash"],
+		}));
+	});
+
+	afterAll(async () => {
+		await session.dispose();
+		// Windows may briefly retain session database handles after disposal; this retries OS cleanup, not program behavior.
+		for (let attempt = 0; attempt < 5; attempt++) {
+			try {
+				removeSyncWithRetries(tempDir);
+				break;
+			} catch (err) {
+				const code = (err as NodeJS.ErrnoException).code;
+				if (code !== "EBUSY" && code !== "ENOTEMPTY" && code !== "EPERM") throw err;
+				if (attempt === 4) break;
+				await Bun.sleep(50 * (attempt + 1));
+			}
+		}
+	});
+
+	it("parses the explicit flag, including equals form, and rejects unsupported values", () => {
+		expect(parseArgs(["--approval-floor", "always-ask"]).approvalFloor).toBe("always-ask");
+		expect(parseArgs(["--approval-floor=always-ask"]).approvalFloor).toBe("always-ask");
+		expect(() => parseArgs(["--approval-floor", "yolo"])).toThrow(/expected always-ask/);
+		expect(() => parseArgs(["--approval-floor"])).toThrow(/requires a value/);
+	});
+
+	it("still blocks execution after effective settings switch to yolo/allow or auto-approve", async () => {
+		const bash = session.getToolByName("bash");
+		if (!bash) throw new Error("Expected bash tool");
+		const args = { command: "echo should-not-run" };
+		await expect(bash.execute("floor-initial", args)).rejects.toThrow(/requires approval but no interactive UI/);
+		settings.override("tools.approvalMode", "write");
+		settings.override("tools.approval", { bash: "allow" });
+		await expect(
+			bash.execute("floor-reloaded", args, undefined, undefined, {
+				settings,
+				autoApprove: true,
+				xdevApproved: true,
+				acpApprovedArgs: args,
+			} as AgentToolContext),
+		).rejects.toThrow(/requires approval but no interactive UI/);
+		settings.override("tools.approvalMode", "yolo");
+		await expect(bash.execute("floor-yolo", args)).rejects.toThrow(/requires approval but no interactive UI/);
+	});
+
+	it("keeps deny stricter than the floor", async () => {
+		const bash = session.getToolByName("bash");
+		if (!bash) throw new Error("Expected bash tool");
+		settings.override("tools.approval", { bash: "deny" });
+		await expect(bash.execute("floor-deny", { command: "echo blocked" })).rejects.toThrow(/blocked by user policy/);
 	});
 });

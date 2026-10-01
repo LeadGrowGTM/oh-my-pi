@@ -15,15 +15,19 @@ export type { ToolApproval, ToolApprovalDecision, ToolTier } from "@oh-my-pi/pi-
 
 export type ApprovalPolicy = "allow" | "deny" | "prompt";
 export type ApprovalMode = "always-ask" | "write" | "yolo";
+/** Session-start runtime constraint, never read from reloadable settings. */
+export type ApprovalFloor = "always-ask";
 
 /** The slice of `AgentToolContext` that approval resolution actually reads. */
 export type ApprovalContextSource = {
 	autoApprove?: boolean;
+	approvalFloor?: ApprovalFloor;
 	settings?: Settings;
 };
 
 export interface ResolvedExecuteTimeApproval {
 	approvalMode: ApprovalMode;
+	approvalFloor?: ApprovalFloor;
 	userPolicies: Record<string, unknown>;
 }
 
@@ -65,20 +69,23 @@ function asPolicyMap(value: unknown): Record<string, unknown> {
  * configured (schema-default `yolo`) grant.
  */
 export function resolveApprovalFromContext(context?: ApprovalContextSource | null): ResolvedExecuteTimeApproval {
+	const approvalFloor = context?.approvalFloor;
 	if (context?.autoApprove === true) {
 		return {
 			approvalMode: "yolo",
 			userPolicies: context.settings ? asPolicyMap(cfgToolsApproval.get(context.settings)) : {},
+			approvalFloor,
 		};
 	}
 	const settings = context?.settings;
 	if (!settings) {
-		return { approvalMode: "always-ask", userPolicies: {} };
+		return { approvalMode: "always-ask", userPolicies: {}, approvalFloor };
 	}
 	const configured: unknown = cfgToolsApprovalMode.get(settings);
 	return {
 		approvalMode: isApprovalMode(configured) ? configured : "yolo",
 		userPolicies: asPolicyMap(cfgToolsApproval.get(settings)),
+		approvalFloor,
 	};
 }
 
@@ -196,15 +203,18 @@ function modeApprovesTier(mode: ApprovalMode, tier: ToolTier): boolean {
  *     policy still honors `tools.approval.write`).
  *  2. User per-tool override, if set and valid.
  *  3. Active mode tier comparison.
+ *  Before any allow, a runtime floor upgrades write/exec calls to prompt,
+ *  preserving tool/user denies and explicit prompts.
  *
- * In yolo mode, override-based tool prompts are ignored; user `tools.approval`
- * settings remain authoritative.
+ * Without a floor, yolo ignores override-based tool prompts; user
+ * `tools.approval` settings remain authoritative.
  */
 export function resolveApproval(
 	tool: ApprovalSubject,
 	args: unknown,
 	mode: ApprovalMode,
 	userConfig: Record<string, unknown> = {},
+	floor?: ApprovalFloor,
 ): ResolvedApproval {
 	const decision = getToolDecision(tool, args);
 	const policyKey = decision.policyKey ?? tool.name;
@@ -249,6 +259,19 @@ export function resolveApproval(
 			override: decision.override,
 			source: "user",
 			...(combinedUserPolicyKey ? { policyKey: combinedUserPolicyKey } : {}),
+		};
+	}
+
+	// Immutable runtime floor wins over every grant, including a tool-owned
+	// allow and a per-tool allow. Denies above and explicit prompts remain stricter.
+	if (floor === "always-ask" && decision.tier !== "read") {
+		return {
+			policy: "prompt",
+			tier: decision.tier,
+			override: decision.override,
+			source: decision.policy === "prompt" ? "tool" : combinedUserPolicy === "prompt" ? "user" : "mode",
+			...(decision.policyKey ? { policyKey: decision.policyKey } : {}),
+			...(decision.reason ? { reason: decision.reason } : {}),
 		};
 	}
 
@@ -342,8 +365,9 @@ export function requiresApproval(
 	args: unknown,
 	mode: ApprovalMode,
 	userConfig: Record<string, unknown> = {},
+	floor?: ApprovalFloor,
 ): { required: boolean; reason?: string } {
-	const resolved = resolveApproval(tool, args, mode, userConfig);
+	const resolved = resolveApproval(tool, args, mode, userConfig, floor);
 	const { policy, reason } = resolved;
 
 	if (policy === "deny") {
