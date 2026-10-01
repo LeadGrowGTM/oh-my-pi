@@ -10,7 +10,6 @@ import {
 	type AgentToolUpdateCallback,
 	isNonBlankContext,
 	joinAdditionalContext,
-	type ToolTier,
 } from "@oh-my-pi/pi-agent-core";
 import type {
 	AssistantMessage,
@@ -38,7 +37,7 @@ import type { AsyncJobSnapshot } from "../../session/agent-session";
 import { MAIN_AGENT_ID } from "../../registry/agent-registry";
 import type { SessionManager } from "../../session/session-manager";
 import { addFileDeleteFallback, addFileWriteFallback } from "../../tools/file-write-fallback";
-import { denyError, formatApprovalPrompt, resolveApproval, resolveApprovalFromContext, TIER_RANK } from "../../tools/approval";
+import { denyError, formatApprovalPrompt, resolveApproval, resolveApprovalFromContext } from "../../tools/approval";
 import type { BranchHandler, NavigateTreeHandler, NewSessionHandler } from "../session-handler-types";
 import { accumulateToolCallResult, buildAggregatedToolCallResult } from "../shared-events";
 import { ManagedTimers } from "./managed-timers";
@@ -489,7 +488,7 @@ export const TOP_LEVEL_AGENT: ExtensionAgentIdentity = Object.freeze({
 
 export class ExtensionRunner {
 	#uiContext: ExtensionUIContext;
-	#approvalFloorGrants = new WeakMap<object, ToolTier>();
+	#approvalFloorGrants = new WeakMap<object, { name: string; params: Record<string, unknown> }>();
 	#mode: ExtensionMode = "print";
 	#toolApprovalPreviewWaiter?: (toolCallId: string) => Promise<void>;
 	#errorListeners: Set<ExtensionErrorListener> = new Set();
@@ -700,11 +699,11 @@ export class ExtensionRunner {
 			);
 			const approval = resolveApproval(resolved.tool, params, approvalMode, userPolicies, this.approvalFloor);
 			if (approval.policy === "deny") throw denyError(approval, resolved.tool.name);
-			const approvedTier = callerContext ? this.#approvalFloorGrants.get(callerContext) : undefined;
-			if (
-				approval.policy === "prompt" &&
-				(approvedTier === undefined || TIER_RANK[approvedTier] < TIER_RANK[approval.tier])
-			) {
+			const grant = callerContext ? this.#approvalFloorGrants.get(callerContext) : undefined;
+			const delegatedApproval =
+				grant !== undefined && grant.name === name && Bun.deepEquals(grant.params, params);
+			if (delegatedApproval && callerContext) this.#approvalFloorGrants.delete(callerContext);
+			if (approval.policy === "prompt" && !delegatedApproval) {
 				if (!callerContext?.ui || callerContext.hasUI === false) {
 					throw new Error(
 						`Tool "${resolved.tool.name}" requires approval but no interactive UI available. ` +
@@ -770,8 +769,8 @@ export class ExtensionRunner {
 		this.#getAsyncJobSnapshotFn = getAsyncJobSnapshot ?? (() => null);
 	}
 
-	grantApprovalFloorDelegation(context: object, tier: ToolTier): () => void {
-		this.#approvalFloorGrants.set(context, tier);
+	grantApprovalFloorDelegation(context: object, name: string, params: Record<string, unknown>): () => void {
+		this.#approvalFloorGrants.set(context, { name, params: structuredClone(params) });
 		return () => this.#approvalFloorGrants.delete(context);
 	}
 

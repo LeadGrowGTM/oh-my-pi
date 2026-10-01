@@ -4611,7 +4611,7 @@ describe("ExtensionRunner", () => {
 			expect(seen.params).toEqual({ command: "echo hi" });
 		});
 
-		it("revokes native delegation approval when a registered replacement returns", async () => {
+		it("limits floored replacement delegation to one matching active call", async () => {
 			const seen: { params?: unknown } = {};
 			const runner = await runnerWithNative(nativeProbe(seen), "always-ask");
 			const prompts: string[] = [];
@@ -4620,6 +4620,7 @@ describe("ExtensionRunner", () => {
 				return prompts.length === 1 ? "Approve" : "Deny";
 			});
 			let savedContext: { invokeTool?: (params: Record<string, unknown>) => Promise<unknown> } | undefined;
+			let changedCallError: unknown;
 			const replacement = wrapRegisteredTool(
 				{
 					definition: {
@@ -4631,6 +4632,11 @@ describe("ExtensionRunner", () => {
 						execute: async (_id, params, _signal, _onUpdate, context) => {
 							savedContext = context;
 							await context?.invokeTool?.(params);
+							try {
+								await context?.invokeTool?.({ command: "touch unauthorized" });
+							} catch (error) {
+								changedCallError = error;
+							}
 							return { content: [{ type: "text", text: "delegated" }] };
 						},
 					},
@@ -4646,12 +4652,13 @@ describe("ExtensionRunner", () => {
 
 			await wrapped.execute("replacement-active", { command: "echo active" }, undefined, undefined, context);
 			expect(seen.params).toEqual({ command: "echo active" });
-			expect(prompts).toHaveLength(1);
+			expect(changedCallError).toBeInstanceOf(Error);
+			expect(prompts).toHaveLength(2);
 
 			if (!savedContext?.invokeTool) throw new Error("Expected replacement to retain its extension context");
 			await expect(savedContext.invokeTool({ command: "echo retained" })).rejects.toThrow(/denied by user/);
 			expect(seen.params).toEqual({ command: "echo active" });
-			expect(prompts).toHaveLength(2);
+			expect(prompts).toHaveLength(3);
 		});
 	});
 

@@ -100,7 +100,6 @@ function createContext(overrides?: {
 	model?: Model;
 	agentId?: string;
 	parentPromptCacheKey?: string;
-	approvalFloor?: "always-ask";
 	register?: (run: CapturedJobRun, options?: AsyncJobRegisterOptions) => string;
 	activeToolNames?: string[];
 	enabledToolNames?: string[];
@@ -138,7 +137,7 @@ function createContext(overrides?: {
 		effectiveExtensionRoots: overrides?.effectiveExtensionRoots,
 		extensionPaths: overrides?.extensionPaths,
 		getAgentId: vi.fn(() => overrides?.agentId),
-		getApprovalFloor: vi.fn(() => overrides?.approvalFloor),
+		getApprovalFloor: vi.fn(() => undefined),
 		sendCustomMessage: vi.fn(async () => {
 			sequence.push("sendCustomMessage");
 		}),

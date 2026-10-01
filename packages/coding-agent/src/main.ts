@@ -1767,10 +1767,7 @@ export async function runRootCommand(
 		// session-critical database connection picks the right busy timeout.
 		// See getDbBusyTimeoutMs().
 		const isProtocolMode = mode === "rpc" || mode === "rpc-ui" || mode === "acp";
-		if (
-			parsedArgs.approvalFloor &&
-			(isProtocolMode || parsedArgs.print || parsedArgs.mode !== undefined || process.stdin.isTTY !== true)
-		) {
+		if (parsedArgs.approvalFloor && process.stdin.isTTY !== true) {
 			throw new Error(
 				"--approval-floor always-ask requires an interactive session; protocol and print modes are unsupported",
 			);
