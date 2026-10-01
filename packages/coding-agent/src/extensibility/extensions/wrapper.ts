@@ -23,7 +23,7 @@ import { defaultLoadModeForToolName } from "../../tools/essential-tools";
 import { withFileMutationSession } from "../../tools/file-write-fallback";
 import { normalizeToolEventInput, resolveToolEventInput } from "../tool-event-input";
 import { applyToolProxy } from "../tool-proxy";
-import { APPROVAL_FLOOR_APPROVED_TIER, type ExtensionRunner } from "./runner";
+import type { ExtensionRunner } from "./runner";
 import type { RegisteredTool, ToolCallEventResult } from "./types";
 
 /**
@@ -439,14 +439,20 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 			// trigger. `sdk.ts` wraps the whole tool registry with this class whenever
 			// a runner exists.
 			const executionContext =
-				this.runner.approvalFloor === "always-ask" && resolved.tier !== "read"
-					? Object.assign(Object.create(context ?? null), { [APPROVAL_FLOOR_APPROVED_TIER]: resolved.tier })
-					: context;
-			result = await this.runner.runScoped(() =>
-				withFileMutationSession(this.runner.sessionId, () =>
-					this.tool.execute(toolCallId, effectiveParams, signal, onUpdate, executionContext),
-				),
-			);
+				this.runner.approvalFloor === "always-ask" && resolved.tier !== "read" ? Object.create(context ?? null) : context;
+			const revokeDelegation =
+				executionContext && this.runner.approvalFloor === "always-ask" && resolved.tier !== "read"
+					? this.runner.grantApprovalFloorDelegation(executionContext, resolved.tier)
+					: undefined;
+			try {
+				result = await this.runner.runScoped(() =>
+					withFileMutationSession(this.runner.sessionId, () =>
+						this.tool.execute(toolCallId, effectiveParams, signal, onUpdate, executionContext),
+					),
+				);
+			} finally {
+				revokeDelegation?.();
+			}
 		} catch (err) {
 			executionError = err instanceof Error ? err : new Error(String(err));
 			result = {

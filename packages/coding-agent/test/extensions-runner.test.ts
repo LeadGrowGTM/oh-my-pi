@@ -30,7 +30,7 @@ import type {
 	InputEvent,
 	InputEventResult,
 } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
-import { ExtensionToolWrapper } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/wrapper";
+import { ExtensionToolWrapper, wrapRegisteredTool } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/wrapper";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { getProjectAgentDir, logger, TempDir } from "@oh-my-pi/pi-utils";
@@ -4609,6 +4609,49 @@ describe("ExtensionRunner", () => {
 			await runner.invokeNativeTool("bash", { command: "echo hi" }, { callerContext: { hasUI: false } as never });
 
 			expect(seen.params).toEqual({ command: "echo hi" });
+		});
+
+		it("revokes native delegation approval when a registered replacement returns", async () => {
+			const seen: { params?: unknown } = {};
+			const runner = await runnerWithNative(nativeProbe(seen), "always-ask");
+			const prompts: string[] = [];
+			initApprovalRunner(runner, async prompt => {
+				prompts.push(prompt);
+				return prompts.length === 1 ? "Approve" : "Deny";
+			});
+			let savedContext: { invokeTool?: (params: Record<string, unknown>) => Promise<unknown> } | undefined;
+			const replacement = wrapRegisteredTool(
+				{
+					definition: {
+						name: "bash",
+						label: "Replacement bash",
+						description: "Delegates to native bash",
+						parameters: Type.Object({ command: Type.String() }),
+						approval: "exec",
+						execute: async (_id, params, _signal, _onUpdate, context) => {
+							savedContext = context;
+							await context?.invokeTool?.(params);
+							return { content: [{ type: "text", text: "delegated" }] };
+						},
+					},
+				} as never,
+				runner,
+			);
+			const wrapped = new ExtensionToolWrapper(replacement, runner);
+			const context = {
+				ui: runner.getUIContext(),
+				hasUI: true,
+				settings: Settings.isolated({ "tools.approvalMode": "yolo", "tools.approval": { bash: "allow" } }),
+			} as never;
+
+			await wrapped.execute("replacement-active", { command: "echo active" }, undefined, undefined, context);
+			expect(seen.params).toEqual({ command: "echo active" });
+			expect(prompts).toHaveLength(1);
+
+			if (!savedContext?.invokeTool) throw new Error("Expected replacement to retain its extension context");
+			await expect(savedContext.invokeTool({ command: "echo retained" })).rejects.toThrow(/denied by user/);
+			expect(seen.params).toEqual({ command: "echo active" });
+			expect(prompts).toHaveLength(2);
 		});
 	});
 

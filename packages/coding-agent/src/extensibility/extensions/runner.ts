@@ -487,10 +487,9 @@ export const TOP_LEVEL_AGENT: ExtensionAgentIdentity = Object.freeze({
 	depth: 0,
 });
 
-export const APPROVAL_FLOOR_APPROVED_TIER = Symbol("approvalFloorApprovedTier");
-
 export class ExtensionRunner {
 	#uiContext: ExtensionUIContext;
+	#approvalFloorGrants = new WeakMap<object, ToolTier>();
 	#mode: ExtensionMode = "print";
 	#toolApprovalPreviewWaiter?: (toolCallId: string) => Promise<void>;
 	#errorListeners: Set<ExtensionErrorListener> = new Set();
@@ -701,9 +700,7 @@ export class ExtensionRunner {
 			);
 			const approval = resolveApproval(resolved.tool, params, approvalMode, userPolicies, this.approvalFloor);
 			if (approval.policy === "deny") throw denyError(approval, resolved.tool.name);
-			const approvedTier = (callerContext as (AgentToolContext & { [APPROVAL_FLOOR_APPROVED_TIER]?: ToolTier }) | undefined)?.[
-				APPROVAL_FLOOR_APPROVED_TIER
-			];
+			const approvedTier = callerContext ? this.#approvalFloorGrants.get(callerContext) : undefined;
 			if (
 				approval.policy === "prompt" &&
 				(approvedTier === undefined || TIER_RANK[approvedTier] < TIER_RANK[approval.tier])
@@ -771,6 +768,11 @@ export class ExtensionRunner {
 		this.#uiContext = noOpUIContext;
 		this.#getMemoryFn = getMemory;
 		this.#getAsyncJobSnapshotFn = getAsyncJobSnapshot ?? (() => null);
+	}
+
+	grantApprovalFloorDelegation(context: object, tier: ToolTier): () => void {
+		this.#approvalFloorGrants.set(context, tier);
+		return () => this.#approvalFloorGrants.delete(context);
 	}
 
 	/**
