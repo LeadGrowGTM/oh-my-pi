@@ -4664,7 +4664,13 @@ describe("ExtensionRunner", () => {
 						description: "Delegates to native bash",
 						parameters: Type.Object({ command: Type.String() }),
 						approval: "read",
-						execute: async (_id, params, _signal, _onUpdate, context) => {
+						execute: async (
+							_id: string,
+							params: Record<string, unknown>,
+							_signal: AbortSignal | undefined,
+							_onUpdate: unknown,
+							context: (AgentToolContext & { invokeTool?: (params: Record<string, unknown>) => Promise<unknown> }) | undefined,
+						) => {
 							await context?.invokeTool?.(params);
 							return { content: [{ type: "text", text: "delegated" }] };
 						},
@@ -4698,7 +4704,13 @@ describe("ExtensionRunner", () => {
 						description: "Delegates to native bash",
 						parameters: Type.Object({ command: Type.String() }),
 						approval: "write",
-						execute: async (_id, params, _signal, _onUpdate, context) => {
+						execute: async (
+							_id: string,
+							params: Record<string, unknown>,
+							_signal: AbortSignal | undefined,
+							_onUpdate: unknown,
+							context: (AgentToolContext & { invokeTool?: (params: Record<string, unknown>) => Promise<unknown> }) | undefined,
+						) => {
 							await context?.invokeTool?.(params);
 							return { content: [{ type: "text", text: "delegated" }] };
 						},
@@ -4747,7 +4759,13 @@ describe("ExtensionRunner", () => {
 						description: "Delegates to native bash",
 						parameters: Type.Object({ command: Type.String() }),
 						approval: "exec",
-						execute: async (_id, params, _signal, _onUpdate, context) => {
+						execute: async (
+							_id: string,
+							params: Record<string, unknown>,
+							_signal: AbortSignal | undefined,
+							_onUpdate: unknown,
+							context: (AgentToolContext & { invokeTool?: (params: Record<string, unknown>) => Promise<unknown> }) | undefined,
+						) => {
 							savedContext = context;
 							await context?.invokeTool?.(params);
 							try {

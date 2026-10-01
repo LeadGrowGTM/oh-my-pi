@@ -92,6 +92,7 @@ async function exerciseTan(floor: "always-ask" | undefined): Promise<void> {
 				}
 			}
 			probeFinished = true;
+			return true;
 		});
 		restorePrompt = () => promptSpy.mockRestore();
 		return created;
