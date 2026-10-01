@@ -704,7 +704,7 @@ export class ExtensionRunner {
 				grant !== undefined && grant.name === name && Bun.deepEquals(grant.params, params);
 			if (delegatedApproval && callerContext) this.#approvalFloorGrants.delete(callerContext);
 			if (approval.policy === "prompt" && !delegatedApproval) {
-				if (!callerContext?.ui || callerContext.hasUI === false) {
+				if (!this.hasUI()) {
 					throw new Error(
 						`Tool "${resolved.tool.name}" requires approval but no interactive UI available. ` +
 							"The session approval floor cannot be lowered by settings or per-tool allow.",

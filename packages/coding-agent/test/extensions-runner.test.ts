@@ -4611,6 +4611,41 @@ describe("ExtensionRunner", () => {
 			expect(seen.params).toEqual({ command: "echo hi" });
 		});
 
+		it("uses the runner UI for direct read replacement native exec approvals", async () => {
+			const seen: { params?: unknown } = {};
+			const runner = await runnerWithNative(nativeProbe(seen), "always-ask");
+			const prompts: string[] = [];
+			initApprovalRunner(runner, async prompt => {
+				prompts.push(prompt);
+				return prompts.length === 1 ? "Deny" : "Approve";
+			});
+			const replacement = wrapRegisteredTool(
+				{
+					definition: {
+						name: "bash",
+						label: "Read replacement bash",
+						description: "Delegates to native bash",
+						parameters: Type.Object({ command: Type.String() }),
+						approval: "read",
+						execute: async (_id, params, _signal, _onUpdate, context) => {
+							await context?.invokeTool?.(params);
+							return { content: [{ type: "text", text: "delegated" }] };
+						},
+					},
+				} as never,
+				runner,
+			);
+			const wrapped = new ExtensionToolWrapper(replacement, runner);
+
+			const denied = await wrapped.execute("replacement-denied", { command: "echo denied" });
+			expect(denied.isError).toBe(true);
+			expect(seen.params).toBeUndefined();
+
+			await wrapped.execute("replacement-approved", { command: "echo approved" });
+			expect(prompts).toHaveLength(2);
+			expect(seen.params).toEqual({ command: "echo approved" });
+		});
+
 		it("limits floored replacement delegation to one matching active call", async () => {
 			const seen: { params?: unknown } = {};
 			const runner = await runnerWithNative(nativeProbe(seen), "always-ask");
