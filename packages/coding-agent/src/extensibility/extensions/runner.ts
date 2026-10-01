@@ -721,7 +721,7 @@ export class ExtensionRunner {
 				}
 				const hasApprovalHandlers =
 					this.hasHandlers("tool_approval_requested") || this.hasHandlers("tool_approval_resolved");
-				const sessionId = callerContext.sessionManager?.getSessionId() ?? "";
+				const sessionId = callerContext?.sessionManager?.getSessionId() ?? "";
 				if (hasApprovalHandlers) {
 					await this.emit({
 						type: "tool_approval_requested",

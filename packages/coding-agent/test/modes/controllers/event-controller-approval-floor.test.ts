@@ -4,6 +4,7 @@ import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { EventController } from "@oh-my-pi/pi-coding-agent/modes/controllers/event-controller";
 import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { cfgToolsApproval, cfgToolsApprovalMode } from "@oh-my-pi/pi-coding-agent/tools/settings";
 import * as titleGenerator from "@oh-my-pi/pi-coding-agent/utils/title-generator";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import { createInteractiveModeContext } from "../../helpers/interactive-mode-context";
@@ -20,8 +21,8 @@ afterEach(() => {
 describe("interactive approval floor attention", () => {
 	it("signals attention for a floor prompt despite yolo and per-tool allow, then returns to working", async () => {
 		await Settings.init({ inMemory: true, cwd: process.cwd() });
-		settings.override("tools.approvalMode", "yolo");
-		settings.override("tools.approval", { bash: "allow" });
+		cfgToolsApprovalMode.override(settings, "yolo");
+		cfgToolsApproval.override(settings, { bash: "allow" });
 		const titleState = vi.spyOn(titleGenerator, "setTerminalTitleState").mockImplementation(() => {});
 		const tool = {
 			name: "bash",

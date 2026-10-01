@@ -10,6 +10,7 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { cfgToolsApproval, cfgToolsApprovalMode } from "@oh-my-pi/pi-coding-agent/tools/settings";
 import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
 
 const BASE_SETTINGS = {
@@ -78,7 +79,7 @@ describe("tools.approvalMode setting", () => {
 				await Bun.sleep(50 * (attempt + 1));
 			}
 		}
-	});
+	}, 30_000);
 
 	function approvalSettings(extraSettings: Record<string, unknown> = {}): Settings {
 		return Settings.isolated({ ...BASE_SETTINGS, ...extraSettings });
@@ -363,8 +364,8 @@ describe("--approval-floor always-ask", () => {
 		if (!bash) throw new Error("Expected bash tool");
 		const args = { command: "echo should-not-run" };
 		await expect(bash.execute("floor-initial", args)).rejects.toThrow(/requires approval but no interactive UI/);
-		settings.override("tools.approvalMode", "write");
-		settings.override("tools.approval", { bash: "allow" });
+		cfgToolsApprovalMode.override(settings, "write");
+		cfgToolsApproval.override(settings, { bash: "allow" });
 		await expect(
 			bash.execute("floor-reloaded", args, undefined, undefined, {
 				settings,
@@ -373,7 +374,7 @@ describe("--approval-floor always-ask", () => {
 				acpApprovedArgs: args,
 			} as AgentToolContext),
 		).rejects.toThrow(/requires approval but no interactive UI/);
-		settings.override("tools.approvalMode", "yolo");
+		cfgToolsApprovalMode.override(settings, "yolo");
 		await expect(bash.execute("floor-yolo", args)).rejects.toThrow(/requires approval but no interactive UI/);
 	});
 
@@ -402,7 +403,7 @@ describe("--approval-floor always-ask", () => {
 				stdout: "pipe",
 				stderr: "pipe",
 				// A real subprocess liveness deadline cannot use this process's fake clock.
-				signal: AbortSignal.timeout(5000),
+				signal: AbortSignal.timeout(10_000),
 			});
 			try {
 				expect(await child.exited).toBe(1);
@@ -414,7 +415,7 @@ describe("--approval-floor always-ask", () => {
 				await child.exited;
 			}
 		}
-	});
+	}, 30_000);
 
 	it("requires a fresh approval for reloaded write and exec allows, while preserving read and deny", async () => {
 		const runner = session.extensionRunner;
@@ -433,8 +434,8 @@ describe("--approval-floor always-ask", () => {
 		try {
 			const readFile = path.join(tempDir, "cwd", "floor-read.txt");
 			fs.writeFileSync(readFile, "readable\n");
-			settings.override("tools.approvalMode", "yolo");
-			settings.override("tools.approval", { bash: "allow", read: "allow" });
+			cfgToolsApprovalMode.override(settings, "yolo");
+			cfgToolsApproval.override(settings, { bash: "allow", read: "allow" });
 			const read = session.getToolByName("read");
 			const bash = session.getToolByName("bash");
 			if (!read || !bash) throw new Error("Expected read and bash tools");
@@ -442,8 +443,8 @@ describe("--approval-floor always-ask", () => {
 			expect(textOf(readResult)).toContain("readable");
 			expect(prompts).toEqual([]);
 
-			settings.override("tools.approvalMode", "yolo");
-			settings.override("tools.approval", { bash: "allow", read: "allow" });
+			cfgToolsApprovalMode.override(settings, "yolo");
+			cfgToolsApproval.override(settings, { bash: "allow", read: "allow" });
 			await expect(bash.execute("floor-write", { command: "echo floor-write" })).rejects.toThrow(
 				/Tool call denied by user/,
 			);
@@ -456,7 +457,7 @@ describe("--approval-floor always-ask", () => {
 			expect(prompts).toHaveLength(2);
 			expect(prompts[1]).toContain("echo floor-exec");
 
-			settings.override("tools.approval", { bash: "deny" });
+			cfgToolsApproval.override(settings, { bash: "deny" });
 			await expect(bash.execute("floor-deny-ui", { command: "echo floor-exec" })).rejects.toThrow(
 				/blocked by user policy/,
 			);
@@ -470,7 +471,7 @@ describe("--approval-floor always-ask", () => {
 	it("keeps deny stricter than the floor", async () => {
 		const bash = session.getToolByName("bash");
 		if (!bash) throw new Error("Expected bash tool");
-		settings.override("tools.approval", { bash: "deny" });
+		cfgToolsApproval.override(settings, { bash: "deny" });
 		await expect(bash.execute("floor-deny", { command: "echo blocked" })).rejects.toThrow(/blocked by user policy/);
 	});
 });

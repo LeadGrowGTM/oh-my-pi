@@ -3740,6 +3740,7 @@ describe("ExtensionRunner", () => {
 				undefined,
 				undefined,
 				undefined,
+				undefined,
 				"always-ask",
 			);
 			const prompts: string[] = [];
@@ -3763,7 +3764,7 @@ describe("ExtensionRunner", () => {
 				},
 			} as AgentTool;
 			const context = {
-				settings: { get: (key: string) => (key === "tools.approvalMode" ? "yolo" : { floor_rewrite: "allow" }) },
+				settings: Settings.isolated({ "tools.approvalMode": "yolo", "tools.approval": { floor_rewrite: "allow" } }),
 				autoApprove: true,
 				xdevApproved: true,
 				acpApprovedArgs: { command: "revised-write" },
@@ -4501,6 +4502,41 @@ describe("ExtensionRunner", () => {
 	});
 
 	describe("invokeTool same-tool delegation", () => {
+		const initApprovalRunner = (
+			runner: ExtensionRunner,
+			select: (title: string, options: string[]) => Promise<string | undefined>,
+		) => {
+			runner.initialize(
+				{
+					sendMessage: () => {},
+					sendUserMessage: () => {},
+					appendEntry: () => {},
+					setLabel: () => {},
+					getActiveTools: () => [],
+					getAllTools: () => [],
+					setActiveTools: async () => {},
+					getCommands: () => [],
+					setModel: async () => false,
+					getThinkingLevel: () => undefined,
+					setThinkingLevel: () => {},
+					getSessionName: () => undefined,
+					setSessionName: async () => {},
+				} as never,
+				{
+					getModel: () => undefined,
+					isIdle: () => true,
+					abort: () => {},
+					hasPendingMessages: () => false,
+					shutdown: () => {},
+					getContextUsage: () => undefined,
+					compact: async () => {},
+					getSystemPrompt: () => [],
+				} as never,
+				undefined,
+				{ select, notify: () => {} } as never,
+			);
+		};
+
 		// Records what the native tool actually received, so the inherited abort/progress channels and
 		// the caller context are observable.
 		function nativeProbe(seen: { signal?: AbortSignal; onUpdate?: unknown; params?: unknown }): AgentTool {
@@ -4526,6 +4562,7 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				undefined,
 				undefined,
 				undefined,
 				undefined,
@@ -4637,8 +4674,9 @@ describe("ExtensionRunner", () => {
 			);
 			const wrapped = new ExtensionToolWrapper(replacement, runner);
 
-			const denied = await wrapped.execute("replacement-denied", { command: "echo denied" });
-			expect(denied.isError).toBe(true);
+			await expect(wrapped.execute("replacement-denied", { command: "echo denied" })).rejects.toThrow(
+				"Tool call denied by user: bash",
+			);
 			expect(seen.params).toBeUndefined();
 
 			await wrapped.execute("replacement-approved", { command: "echo approved" });
@@ -4670,22 +4708,24 @@ describe("ExtensionRunner", () => {
 			);
 			const wrapped = new ExtensionToolWrapper(replacement, runner);
 
-			const denied = await wrapped.execute("write-to-exec-denied", { command: "echo denied" });
-			expect(denied.isError).toBe(true);
+			await expect(wrapped.execute("write-to-exec-denied", { command: "echo denied" })).rejects.toThrow(
+				"Tool call denied by user: bash",
+			);
 			expect(seen.params).toBeUndefined();
 
 			await wrapped.execute("write-to-exec-approved", { command: "echo approved" });
 			expect(seen.params).toEqual({ command: "echo approved" });
 
 			runner.initialize({} as never, {} as never);
-			const headless = await wrapped.execute(
-				"write-to-exec-headless",
-				{ command: "echo headless" },
-				undefined,
-				undefined,
-				{ hasUI: false } as never,
-			);
-			expect(headless.isError).toBe(true);
+			await expect(
+				wrapped.execute(
+					"write-to-exec-headless",
+					{ command: "echo headless" },
+					undefined,
+					undefined,
+					{ hasUI: false } as never,
+				),
+			).rejects.toThrow(/requires approval but no interactive UI/);
 			expect(seen.params).toEqual({ command: "echo approved" });
 		});
 
