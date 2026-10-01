@@ -733,7 +733,10 @@ export class ExtensionRunner {
 					});
 				}
 				const choice = await untilAborted(options?.signal, () =>
-					this.getUIContext().select(formatApprovalPrompt(resolved.tool, params, approval.reason), ["Approve", "Deny"]),
+					this.getUIContext().select(formatApprovalPrompt(resolved.tool, params, approval.reason), [
+						"Approve",
+						"Deny",
+					]),
 				);
 				const approved = choice === "Approve";
 				if (hasApprovalHandlers) {

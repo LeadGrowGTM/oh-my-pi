@@ -79,9 +79,15 @@ async function exerciseTan(floor: "always-ask" | undefined): Promise<void> {
 			if (!write) throw new Error("Real child did not install write");
 			for (const [index, marker] of markers.entries()) {
 				const args = { path: marker, content: payload };
-				const context = index === 1
-					? ({ settings: options.settings, autoApprove: true, xdevApproved: true, acpApprovedArgs: args } as AgentToolContext)
-					: undefined;
+				const context =
+					index === 1
+						? ({
+								settings: options.settings,
+								autoApprove: true,
+								xdevApproved: true,
+								acpApprovedArgs: args,
+							} as AgentToolContext)
+						: undefined;
 				const execution = write.execute(`tan-floor-write-${index}`, args, undefined, undefined, context);
 				if (floor) {
 					await expect(execution).rejects.toThrow();

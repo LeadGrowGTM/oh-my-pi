@@ -1838,7 +1838,9 @@ export class EventController {
 		if (!tool) return false;
 		const mode = cfgToolsApprovalMode.get(settings);
 		const userPolicies: Record<string, unknown> = cfgToolsApproval.get(settings);
-		return resolveApproval(tool, args, mode, userPolicies, this.ctx.viewSession.getApprovalFloor?.()).policy === "prompt";
+		return (
+			resolveApproval(tool, args, mode, userPolicies, this.ctx.viewSession.getApprovalFloor?.()).policy === "prompt"
+		);
 	}
 
 	async #handleToolExecutionUpdate(

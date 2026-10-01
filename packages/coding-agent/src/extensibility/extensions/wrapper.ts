@@ -439,7 +439,9 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 			// trigger. `sdk.ts` wraps the whole tool registry with this class whenever
 			// a runner exists.
 			const executionContext =
-				this.runner.approvalFloor === "always-ask" && resolved.tier !== "read" ? Object.create(context ?? null) : context;
+				this.runner.approvalFloor === "always-ask" && resolved.tier !== "read"
+					? Object.create(context ?? null)
+					: context;
 			const revokeDelegation =
 				executionContext && this.runner.approvalFloor === "always-ask" && resolved.tier !== "read"
 					? this.runner.grantApprovalFloorDelegation(

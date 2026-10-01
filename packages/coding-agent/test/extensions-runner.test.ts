@@ -4669,7 +4669,9 @@ describe("ExtensionRunner", () => {
 							params: Record<string, unknown>,
 							_signal: AbortSignal | undefined,
 							_onUpdate: unknown,
-							context: (AgentToolContext & { invokeTool?: (params: Record<string, unknown>) => Promise<unknown> }) | undefined,
+							context:
+								| (AgentToolContext & { invokeTool?: (params: Record<string, unknown>) => Promise<unknown> })
+								| undefined,
 						) => {
 							await context?.invokeTool?.(params);
 							return { content: [{ type: "text", text: "delegated" }] };
@@ -4709,7 +4711,9 @@ describe("ExtensionRunner", () => {
 							params: Record<string, unknown>,
 							_signal: AbortSignal | undefined,
 							_onUpdate: unknown,
-							context: (AgentToolContext & { invokeTool?: (params: Record<string, unknown>) => Promise<unknown> }) | undefined,
+							context:
+								| (AgentToolContext & { invokeTool?: (params: Record<string, unknown>) => Promise<unknown> })
+								| undefined,
 						) => {
 							await context?.invokeTool?.(params);
 							return { content: [{ type: "text", text: "delegated" }] };
@@ -4730,13 +4734,9 @@ describe("ExtensionRunner", () => {
 
 			runner.initialize({} as never, {} as never);
 			await expect(
-				wrapped.execute(
-					"write-to-exec-headless",
-					{ command: "echo headless" },
-					undefined,
-					undefined,
-					{ hasUI: false } as never,
-				),
+				wrapped.execute("write-to-exec-headless", { command: "echo headless" }, undefined, undefined, {
+					hasUI: false,
+				} as never),
 			).rejects.toThrow(/requires approval but no interactive UI/);
 			expect(seen.params).toEqual({ command: "echo approved" });
 		});
@@ -4764,7 +4764,9 @@ describe("ExtensionRunner", () => {
 							params: Record<string, unknown>,
 							_signal: AbortSignal | undefined,
 							_onUpdate: unknown,
-							context: (AgentToolContext & { invokeTool?: (params: Record<string, unknown>) => Promise<unknown> }) | undefined,
+							context:
+								| (AgentToolContext & { invokeTool?: (params: Record<string, unknown>) => Promise<unknown> })
+								| undefined,
 						) => {
 							savedContext = context;
 							await context?.invokeTool?.(params);
