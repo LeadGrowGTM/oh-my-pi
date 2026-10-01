@@ -37,7 +37,13 @@ import type { AsyncJobSnapshot } from "../../session/agent-session";
 import { MAIN_AGENT_ID } from "../../registry/agent-registry";
 import type { SessionManager } from "../../session/session-manager";
 import { addFileDeleteFallback, addFileWriteFallback } from "../../tools/file-write-fallback";
-import { denyError, formatApprovalPrompt, resolveApproval, resolveApprovalFromContext } from "../../tools/approval";
+import {
+	denyError,
+	formatApprovalPrompt,
+	resolveApproval,
+	resolveApprovalFromContext,
+	type ToolTier,
+} from "../../tools/approval";
 import type { BranchHandler, NavigateTreeHandler, NewSessionHandler } from "../session-handler-types";
 import { accumulateToolCallResult, buildAggregatedToolCallResult } from "../shared-events";
 import { ManagedTimers } from "./managed-timers";
@@ -488,7 +494,7 @@ export const TOP_LEVEL_AGENT: ExtensionAgentIdentity = Object.freeze({
 
 export class ExtensionRunner {
 	#uiContext: ExtensionUIContext;
-	#approvalFloorGrants = new WeakMap<object, { name: string; params: Record<string, unknown> }>();
+	#approvalFloorGrants = new WeakMap<object, { name: string; params: Record<string, unknown>; tier: ToolTier }>();
 	#mode: ExtensionMode = "print";
 	#toolApprovalPreviewWaiter?: (toolCallId: string) => Promise<void>;
 	#errorListeners: Set<ExtensionErrorListener> = new Set();
@@ -701,7 +707,10 @@ export class ExtensionRunner {
 			if (approval.policy === "deny") throw denyError(approval, resolved.tool.name);
 			const grant = callerContext ? this.#approvalFloorGrants.get(callerContext) : undefined;
 			const delegatedApproval =
-				grant !== undefined && grant.name === name && Bun.deepEquals(grant.params, params);
+				grant !== undefined &&
+				grant.name === name &&
+				grant.tier === approval.tier &&
+				Bun.deepEquals(grant.params, params);
 			if (delegatedApproval && callerContext) this.#approvalFloorGrants.delete(callerContext);
 			if (approval.policy === "prompt" && !delegatedApproval) {
 				if (!this.hasUI()) {
@@ -769,8 +778,13 @@ export class ExtensionRunner {
 		this.#getAsyncJobSnapshotFn = getAsyncJobSnapshot ?? (() => null);
 	}
 
-	grantApprovalFloorDelegation(context: object, name: string, params: Record<string, unknown>): () => void {
-		this.#approvalFloorGrants.set(context, { name, params: structuredClone(params) });
+	grantApprovalFloorDelegation(
+		context: object,
+		name: string,
+		params: Record<string, unknown>,
+		tier: ToolTier,
+	): () => void {
+		this.#approvalFloorGrants.set(context, { name, params: structuredClone(params), tier });
 		return () => this.#approvalFloorGrants.delete(context);
 	}
 

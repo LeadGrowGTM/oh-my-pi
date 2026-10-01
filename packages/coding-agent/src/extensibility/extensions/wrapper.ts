@@ -442,7 +442,7 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 				this.runner.approvalFloor === "always-ask" && resolved.tier !== "read" ? Object.create(context ?? null) : context;
 			const revokeDelegation =
 				executionContext && this.runner.approvalFloor === "always-ask" && resolved.tier !== "read"
-					? this.runner.grantApprovalFloorDelegation(executionContext, this.tool.name, effectiveParams)
+					? this.runner.grantApprovalFloorDelegation(executionContext, this.tool.name, effectiveParams, resolved.tier)
 					: undefined;
 			try {
 				result = await this.runner.runScoped(() =>

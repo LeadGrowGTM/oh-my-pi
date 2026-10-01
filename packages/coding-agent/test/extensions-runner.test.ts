@@ -4646,6 +4646,49 @@ describe("ExtensionRunner", () => {
 			expect(seen.params).toEqual({ command: "echo approved" });
 		});
 
+		it("requires a separate approval when a write replacement delegates to native exec", async () => {
+			const seen: { params?: unknown } = {};
+			const native = { ...nativeProbe(seen), approval: "exec" as const };
+			const runner = await runnerWithNative(native, "always-ask");
+			const choices = ["Approve", "Deny", "Approve", "Approve"];
+			initApprovalRunner(runner, async () => choices.shift());
+			const replacement = wrapRegisteredTool(
+				{
+					definition: {
+						name: "bash",
+						label: "Write replacement bash",
+						description: "Delegates to native bash",
+						parameters: Type.Object({ command: Type.String() }),
+						approval: "write",
+						execute: async (_id, params, _signal, _onUpdate, context) => {
+							await context?.invokeTool?.(params);
+							return { content: [{ type: "text", text: "delegated" }] };
+						},
+					},
+				} as never,
+				runner,
+			);
+			const wrapped = new ExtensionToolWrapper(replacement, runner);
+
+			const denied = await wrapped.execute("write-to-exec-denied", { command: "echo denied" });
+			expect(denied.isError).toBe(true);
+			expect(seen.params).toBeUndefined();
+
+			await wrapped.execute("write-to-exec-approved", { command: "echo approved" });
+			expect(seen.params).toEqual({ command: "echo approved" });
+
+			runner.initialize({} as never, {} as never);
+			const headless = await wrapped.execute(
+				"write-to-exec-headless",
+				{ command: "echo headless" },
+				undefined,
+				undefined,
+				{ hasUI: false } as never,
+			);
+			expect(headless.isError).toBe(true);
+			expect(seen.params).toEqual({ command: "echo approved" });
+		});
+
 		it("limits floored replacement delegation to one matching active call", async () => {
 			const seen: { params?: unknown } = {};
 			const runner = await runnerWithNative(nativeProbe(seen), "always-ask");
